@@ -1,8 +1,12 @@
-# Sənin idarə edəcəyin əsas zona buradır. 
-# Yeni nəsə əlavə etmək istəsən, sadəcə bu lüğəti (dictionary) genişləndir.
+# Çekdəki ad bu lüğətdəki açarla uyğun gələndə: (bazada axtarılacaq ad, miqdar əmsalı)
+# FORMAT: "Çekdə görünən hissə": ("Bazadakı dəqiq ad", əmsal)
+#
+# Vacib:
+# - Əvvəl daha DƏQİQ / uzun açarları yazın, sonra qısa ümumi sözləri (məs. "cola" sona).
+# - Açarda çekdəki fərqli yazılışın özünü yazın (məs. "salami toskano" / "toscano").
+# - Əmsal 1 = miqdar dəyişmir; 0.5 = yarısı və s.
 
 SPECIAL_RULES = {
-    # FORMAT: "Çekdəki Ad": ("Bazadakı Dəqiq Ad", Miqdar Əmsalı)
     "avokado": ("avocado new", 1),
     "avocado": ("avocado new", 1),
     "avocado neü": ("avocado new", 1),
@@ -27,5 +31,5 @@ SPECIAL_RULES = {
     "ice cream": ("Ice cream Room (kq)", 1),
     "gwen": ("Ice cream Room (kq)", 1),
     "puste": ("Fistiq (kg)", 1),
-    "fistiq": ("Fistiq (kg)", 1)
+    "fistiq": ("Fistiq (kg)", 1),
 }

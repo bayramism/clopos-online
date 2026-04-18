@@ -67,10 +67,29 @@ def normalize_text_loose(text):
 
 
 def apply_special_logic(name, qty):
-    n_norm = normalize_text(name)
+    """rules.py açarı çek adının içində (normallaşdırılmış) axtarır.
+    1) sıx + loose alt-sətir; 2) token_set yüksək olduqda (fərqli yazılış)."""
+    if not name or not str(name).strip():
+        return name, qty, 1
+    raw = str(name).strip()
+    n_strict = normalize_text(raw)
+    n_loose = normalize_text_loose(raw)
+
     for key, val in SPECIAL_RULES.items():
-        if normalize_text(key) in n_norm:
+        ks = normalize_text(str(key))
+        kl = normalize_text_loose(str(key))
+        if ks and (ks in n_strict or ks in n_loose):
             return val[0], qty * val[1], val[1]
+        if kl and (kl in n_loose or kl in n_strict):
+            return val[0], qty * val[1], val[1]
+
+    for key, val in SPECIAL_RULES.items():
+        ks = normalize_text(str(key))
+        if len(ks) < 3:
+            continue
+        if fuzz.token_set_ratio(ks, n_strict) >= 86:
+            return val[0], qty * val[1], val[1]
+
     return name, qty, 1
 
 

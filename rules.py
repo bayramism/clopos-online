@@ -88,7 +88,7 @@ SPECIAL_RULES_BY_RESTAURANT = {
         "Tiramisu pecenye 400 gr": ("Tiramisu pecenye 400 gr", 0.4),  
         "Final Qargidali Yag 5l (ed)": ("Final Qargidali Yag 5l (ed)", 5),
         "Kent bulyon 90qr (ed)": ("Kent bulyon 90qr (ed)", 0.09),
-        "Marini Savoiardi 400gr (ed)" ("Tiramisu pecenye 400 gr", 0.4), 
+        "Marini Savoiardi 400gr (ed)": ("Tiramisu pecenye 400 gr", 0.4), 
         ),
     },
 }

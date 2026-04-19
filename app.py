@@ -97,16 +97,22 @@ def apply_special_logic(name, qty, restaurant: str):
     n_strict = normalize_text(raw)
     n_loose = normalize_text_loose(raw)
     rules = merged_special_rules(restaurant)
+    # Əvvəl uzun açar (məs. «zire zeytun yagi») — qısa alt-sətir təsadüfi tutulmasın
+    rule_items = sorted(
+        rules.items(),
+        key=lambda kv: len(normalize_text(str(kv[0]))),
+        reverse=True,
+    )
 
-    for key, val in rules.items():
+    for key, val in rule_items:
         ks = normalize_text(str(key))
         kl = normalize_text_loose(str(key))
         if ks and (ks in n_strict or ks in n_loose):
-            return val[0], qty * val[1], val[1]
+            return str(val[0]).strip(), qty * val[1], val[1]
         if kl and (kl in n_loose or kl in n_strict):
-            return val[0], qty * val[1], val[1]
+            return str(val[0]).strip(), qty * val[1], val[1]
 
-    for key, val in rules.items():
+    for key, val in rule_items:
         ks = normalize_text(str(key))
         if len(ks) < 3:
             continue
@@ -115,7 +121,7 @@ def apply_special_logic(name, qty, restaurant: str):
         # 2+ kəlməli açar: bütün kəlmələr çekdə token kimi olmalı (yanlış Juice tutulmasının qarşısı)
         if len(ks.split()) >= 2 and not _all_rule_key_tokens_in_receipt(ks, n_strict):
             continue
-        return val[0], qty * val[1], val[1]
+        return str(val[0]).strip(), qty * val[1], val[1]
 
     return name, qty, 1
 
@@ -422,12 +428,63 @@ def to_tapilmayan_only_bytes(unmatched_df):
     return output.getvalue()
 
 
+def _resolve_id_for_product(df_base, name_query):
+    """Bazada Ad ilə ID tapır: dəqiq, böyük/kiçik, NFC, normallaşdırılmış, son çarə ratio.
+    Qaydadan gələn ad Exceldə «eyni görünən» amma Unicode fərqli olanda kömək edir."""
+    if name_query is None:
+        return None, None
+    raw = str(name_query).strip()
+    if not raw or raw.lower() in ("nan", "none"):
+        return None, None
+
+    ads = df_base["ad"].astype(str).str.strip()
+
+    def _pick(mask):
+        if not mask.any():
+            return None, None
+        row0 = df_base.loc[mask].iloc[0]
+        return int(row0["id"]), str(row0["ad"]).strip()
+
+    m, ad = _pick(ads == raw)
+    if m is not None:
+        return m, ad
+
+    m, ad = _pick(ads.str.lower() == raw.lower())
+    if m is not None:
+        return m, ad
+
+    raw_nfc = _nfc(raw).strip().lower()
+    nfc_match = ads.map(lambda x: _nfc(str(x)).strip().lower()) == raw_nfc
+    m, ad = _pick(nfc_match)
+    if m is not None:
+        return m, ad
+
+    qn = normalize_text(raw)
+    norm_match = ads.map(lambda x: normalize_text(str(x))) == qn
+    m, ad = _pick(norm_match)
+    if m is not None:
+        return m, ad
+
+    raw_cmp = _nfc(raw).strip().lower()
+    best_r, best_id, best_ad = 0, None, None
+    for _, row in df_base.iterrows():
+        ad = str(row["ad"]).strip()
+        r = fuzz.ratio(raw_cmp, _nfc(ad).strip().lower())
+        if r > best_r:
+            best_r = r
+            best_id = int(row["id"])
+            best_ad = ad
+    if best_id is not None and best_r >= 96:
+        return best_id, best_ad
+    return None, None
+
+
 def _first_id_for_name(df_base, m_name):
-    m = str(m_name).strip()
-    sub = df_base.loc[df_base["ad"].astype(str).str.strip() == m, "id"]
-    if sub.empty:
-        raise KeyError(f"id tapılmadı: {m!r}")
-    return int(sub.iloc[0])
+    """Köhnə çağırışlar üçün; uğursuzdursa KeyError."""
+    mid, _ = _resolve_id_for_product(df_base, m_name)
+    if mid is None:
+        raise KeyError(f"id tapılmadı: {m_name!r}")
+    return mid
 
 
 # --- SİDEBAR ---
@@ -547,8 +604,12 @@ with tab1:
                         threshold=match_thr,
                         safe_mode=safe_mode,
                     )
+                    mid, _canon = (None, None)
                     if m_name:
-                        mid = _first_id_for_name(df_base, m_name)
+                        mid, _canon = _resolve_id_for_product(df_base, m_name)
+                    if mid is None:
+                        mid, _canon = _resolve_id_for_product(df_base, p_name)
+                    if mid is not None:
                         final_list.append(
                             {
                                 "ID": mid,
@@ -813,8 +874,12 @@ with tab2:
                     threshold=74,
                     safe_mode=True,
                 )
+                tid, _ = (None, None)
                 if m_name:
-                    tid = _first_id_for_name(db, m_name)
+                    tid, _ = _resolve_id_for_product(db, m_name)
+                if tid is None:
+                    tid, _ = _resolve_id_for_product(db, p_name)
+                if tid is not None:
                     if tid not in bot_ids:
                         missing.append(name)
                 else:

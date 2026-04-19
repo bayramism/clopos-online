@@ -20,13 +20,25 @@ if "last_export" not in st.session_state:
 
 
 def _nfc(s: str) -> str:
-    return unicodedata.normalize("NFC", str(s)).replace("\u00a0", " ")
+    s = unicodedata.normalize("NFKC", str(s)).replace("\u00a0", " ")
+    s = s.translate(dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff"), None))
+    return unicodedata.normalize("NFC", s)
+
+
+def _strip_unicode_marks(s: str) -> str:
+    """Rosé/Rose, görünməz fərqlər — Exceldən gələn latın aksentlərini çıxarır."""
+    return "".join(
+        ch
+        for ch in unicodedata.normalize("NFD", s)
+        if unicodedata.category(ch) != "Mn"
+    )
 
 
 def normalize_text(text):
     if not text:
         return ""
     text = _nfc(text).lower().strip()
+    text = _strip_unicode_marks(text)
     text = re.sub(r"\(\s*(?:ed|kg|kq|lt|qr|gr|ml|l)\s*\)", "", text)
     text = re.sub(r"\d+\s*%", "", text)
     text = re.sub(r"\d+[\.,]\d+", "", text)
@@ -56,6 +68,7 @@ def normalize_text_loose(text):
     if not text:
         return ""
     text = _nfc(text).lower().strip()
+    text = _strip_unicode_marks(text)
     text = re.sub(r"\(\s*(?:ed|kg|kq|lt|qr|gr|ml|l)\s*\)", "", text)
     text = re.sub(r"\d+\s*%", "", text)
     text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
@@ -264,6 +277,21 @@ def _match_with_processor(
             picked = _pick_by_volume_signature(q, gated)
             if picked is not None:
                 return picked, 100.0
+
+    # Sıx norm yoxdursa, loose (aksent/rəqəm saxlanma) ilə tam uyğun — Rosé vs Rose
+    if proc_fn is _fuzz_proc:
+        q_lo = normalize_text_loose(q)
+        loose_equal = [ch for ch in choices if normalize_text_loose(str(ch)) == q_lo]
+        if loose_equal:
+            gated = [
+                str(ch)
+                for ch in loose_equal
+                if _bar_and_volume_gate(q, q_norm, str(ch), _fuzz_proc(str(ch)))
+            ]
+            if gated:
+                picked = _pick_by_volume_signature(q, gated)
+                if picked is not None:
+                    return picked, 100.0
 
     # Çox yaxın tam uyğunluq (məs. bazada «6 li» / çekdə «6li») — kiçik fərqləri tutur
     if len(choices) <= 4000 and len(q_norm) >= 6:
@@ -575,8 +603,10 @@ def _resolve_id_for_product(df_base, name_query):
     if m is not None:
         return m, ad
 
-    raw_nfc = _nfc(raw).strip().lower()
-    nfc_match = ads.map(lambda x: _nfc(str(x)).strip().lower()) == raw_nfc
+    raw_nfc = _strip_unicode_marks(_nfc(raw).strip().lower())
+    nfc_match = ads.map(
+        lambda x: _strip_unicode_marks(_nfc(str(x)).strip().lower())
+    ) == raw_nfc
     m, ad = _pick(nfc_match)
     if m is not None:
         return m, ad
@@ -587,17 +617,30 @@ def _resolve_id_for_product(df_base, name_query):
     if m is not None:
         return m, ad
 
-    raw_cmp = _nfc(raw).strip().lower()
+    raw_cmp = _strip_unicode_marks(_nfc(raw).strip().lower())
     best_r, best_id, best_ad = 0, None, None
     for _, row in df_base.iterrows():
         ad = str(row["ad"]).strip()
-        r = fuzz.ratio(raw_cmp, _nfc(ad).strip().lower())
+        r = fuzz.ratio(raw_cmp, _strip_unicode_marks(_nfc(ad).strip().lower()))
         if r > best_r:
             best_r = r
             best_id = int(row["id"])
             best_ad = ad
     if best_id is not None and best_r >= 96:
         return best_id, best_ad
+    if len(raw_cmp) >= 10:
+        best_ts, best_id2, best_ad2 = 0, None, None
+        for _, row in df_base.iterrows():
+            ad = str(row["ad"]).strip()
+            ts = float(
+                fuzz.token_set_ratio(
+                    raw_cmp, _strip_unicode_marks(_nfc(ad).strip().lower())
+                )
+            )
+            if ts > best_ts:
+                best_ts, best_id2, best_ad2 = ts, int(row["id"]), ad
+        if best_id2 is not None and best_ts >= 93.0:
+            return best_id2, best_ad2
     return None, None
 
 

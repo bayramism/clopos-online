@@ -550,15 +550,21 @@ def _read_single_db_path(path):
 def get_db(res_name, category):
     """Horeca: yalnız *_horeca. Dark Kitchen: *_dk + *_horeca birləşik (eyni Ad təkrarlanmasa, dk üstün)."""
     if category == "Horeca":
-        return _read_single_db_path(_resolve_db_path_for_suffix(res_name, "horeca"))
+        raw = _read_single_db_path(_resolve_db_path_for_suffix(res_name, "horeca"))
+        if raw is None or raw.empty:
+            return None
+        return standardize_columns(raw, chek_fayli=False)
     parts = []
     for suffix in ("dk", "horeca"):
-        df = _read_single_db_path(_resolve_db_path_for_suffix(res_name, suffix))
-        if df is not None and not df.empty:
-            parts.append(df)
+        raw = _read_single_db_path(_resolve_db_path_for_suffix(res_name, suffix))
+        if raw is None or raw.empty:
+            continue
+        parts.append(standardize_columns(raw, chek_fayli=False))
     if not parts:
         return None
     out = pd.concat(parts, ignore_index=True)
+    # Eyni başlıqla iki sütun (məs. biri «Ad», biri «ad») olanda df["ad"] DataFrame olur → .str xətası
+    out = out.loc[:, ~out.columns.duplicated(keep="first")]
     if "ad" in out.columns:
         out = out.drop_duplicates(subset=["ad"], keep="first")
     return out

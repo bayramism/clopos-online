@@ -14,12 +14,11 @@
     "BIBLIOTEKA": {
       "avokado": ["Avocado new", 1],
       "mango": ["Mango new", 1],
-      "kelem": ["Kelem", 1],
       "qatiq": ["Qatiq 450gr", 0.45],
       "Dondurulmush shabalid (kg)": ["Dondurulmush shabalid (kg)", 0.5],
       "Qaymaq Petmol 33%": ["Qaymaq Petmol 33% (kg)", 0.5],
-      "narsherab": ["Narsherab (kg)", 0.345],
-      "sirab qazli": ["Sirab Qazli (kg)", 0.5],
+      "Narsarab (345gr)": ["Narsherab (kg)", 0.345],
+      "Sirab Qazli 0,5l (ed)": ["Sirab Qazli 0,5l (ed)", 0.5],
       "Tsar un": ["Tsar un (kg)", 5],
       "Zire zeytun yagi": ["Zeytun Yag 1l (ed)", 1],
       "borges zeytun yagi": ["Zeytun Yag 1l (ed)", 1],
@@ -51,6 +50,14 @@
       "pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
       "Bondurel lobya ag 425qr": ["Bondurel lobya ag 425qr", 0.425],
       "Dante Zeytun Yagi EVOO Trufle 250 ml": ["Trufel Yagi New", 0.25],
+      "Lakana Brown Sugar 3kg (ed)": ["Lakana Brown Sugar 3kg (ed)", 3],
+      "American Garden Xardal 227gr (ed)": ["American Garden Xardal 227gr (ed)", 0.227],
+      "SolPro Mayonez 67% 10kg (ed)": ["SolPro Mayonez 67% 10kg (ed)", 10],
+      "Heinz ketchup 320gr (ed)": ["Heinz ketchup 320gr (ed)", 0.32],
+      "Xama brest-litovski 25% 300gr (ed)": ["Xama NEW", 0.3],
+      "Unity Food Edamame 500g (ed)": ["Unity Food Edamame 500g (ed)", 0.5],
+      "Bildircin yumurtasi": ["Bildircin yumurtasi", 12],
+      "Sirin Kartof kq": ["Kartof Batat", 1],
       "Bonduriel Qirmizi lobya 425qr": ["Bonduriel Qirmizi lobya 425qr", 0.425]
     }
   }

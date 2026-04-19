@@ -1,0 +1,12 @@
+name: Python syntax
+on: [push, pull_request]
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -c "import json; json.load(open('rules_data.json', encoding='utf-8'))"
+      - run: python -m py_compile app.py rules.py

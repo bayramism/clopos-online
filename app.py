@@ -163,6 +163,19 @@ def _match_with_processor(
         if proc_fn(choice) == q_norm:
             return str(choice), 100.0
 
+    # Çox yaxın tam uyğunluq (məs. bazada «6 li» / çekdə «6li») — kiçik fərqləri tutur
+    if len(choices) <= 4000 and len(q_norm) >= 6:
+        best_c = None
+        best_r = 0
+        for choice in choices:
+            cn = proc_fn(choice)
+            r = fuzz.ratio(q_norm, cn)
+            if r > best_r:
+                best_r = r
+                best_c = choice
+        if best_c is not None and best_r >= 98:
+            return str(best_c), float(min(best_r, 99.9))
+
     # 3+ kəlmə: WRatio tam ifadəni (məs. «sensoy sweet chili») token_set-dən yaxşı tuta bilər
     n_words = len(q_norm.split())
     primary_scorer = fuzz.WRatio if n_words >= 3 else fuzz.token_set_ratio
@@ -199,10 +212,11 @@ def _match_with_processor(
     if score < threshold:
         return None, score
 
-    # İki baza sətri eyni xala yaxındırsa — səhv seçim riski; təhlükəsiz rejimdə rədd
+    # İki baza sətri eyni xala yaxındırsa — səhv seçim riski; çox yüksək xalda margin tətbiq olunmur
     if (
         score_margin is not None
         and score < 99.9
+        and score < 88
         and not used_alt_scorer
         and not skip_word_gate
     ):
@@ -495,17 +509,32 @@ with tab1:
             choices = df_base["ad"].tolist()
             fail_debug = []
             tapilmayan_rows = []
+            skipped_rows = []
             safe_mode = not aggressive_match
-            for _, row in df_c.iterrows():
+            for row_idx, (_, row) in enumerate(df_c.iterrows(), start=1):
                 o_name = ""
                 p_name = ""
                 try:
                     o_name = str(row.get("ad", "")).strip()
                     if not o_name or o_name.lower() in ("nan", "none"):
+                        skipped_rows.append(
+                            {
+                                "Sətir": row_idx,
+                                "Çekdəki_ad": str(row.get("ad", ""))[:240],
+                                "Səbəb": "Boş / etibarsız ad",
+                            }
+                        )
                         continue
                     o_qty = parse_az_number(row.get("miqdar", 0))
                     unit_price = parse_az_number(row.get("price", 0))
                     if o_qty == 0:
+                        skipped_rows.append(
+                            {
+                                "Sətir": row_idx,
+                                "Çekdəki_ad": o_name,
+                                "Səbəb": "Miqdar 0",
+                            }
+                        )
                         continue
 
                     p_name, p_qty, _fct = apply_special_logic(o_name, o_qty, curr)
@@ -549,7 +578,9 @@ with tab1:
                         fail_debug.append(row_dbg)
                         tapilmayan_rows.append(
                             {
+                                "Sətir": row_idx,
                                 "Çekdəki_ad": o_name,
+                                "Qaydadan_sonra": p_name,
                                 "Miqdar": o_qty,
                                 "Bir_vahid_COST": round(cost, 4),
                                 "ID_əl_ile": "",
@@ -575,9 +606,11 @@ with tab1:
                     )
                     tapilmayan_rows.append(
                         {
+                            "Sətir": row_idx,
                             "Çekdəki_ad": o_name
                             or str(row.get("ad", "")).strip()
                             or "(xəta)",
+                            "Qaydadan_sonra": p_name,
                             "Miqdar": eq_x if eq_x else "",
                             "Bir_vahid_COST": round(cst_x, 4) if eq_x else "",
                             "ID_əl_ile": "",
@@ -586,13 +619,25 @@ with tab1:
                     )
                     continue
 
+            n_cek = len(df_c)
+            n_tutulan = len(final_list)
+            n_tapilmayan = len(tapilmayan_rows)
+            n_kecilen = len(skipped_rows)
+            st.info(
+                f"**Çek sətri (cəmi):** {n_cek} | **Avtomatik tutulan:** {n_tutulan} | "
+                f"**Tapılmayan:** {n_tapilmayan} | **Keçilən (boş ad / miqdar 0):** {n_kecilen}  \n"
+                f"*(Yoxlama: {n_tutulan} + {n_tapilmayan} + {n_kecilen} = {n_tutulan + n_tapilmayan + n_kecilen} — çeklə uyğun gəlməlidir.)*"
+            )
+            if skipped_rows:
+                with st.expander("Keçilən sətirlər (boş ad və ya miqdar 0)", expanded=False):
+                    st.dataframe(pd.DataFrame(skipped_rows), use_container_width=True)
+
             if not final_list:
                 st.warning(
                     "Uyğun məhsul tapılmadı. Ad yazılışları fərqli ola bilər və ya baza faylı uyğun deyil."
                 )
                 st.info(
-                    f"Yoxlanan çek sətri: {len(df_c)} | Baza məhsulu: {len(df_base)} | "
-                    f"Uğursuz emal/match sayı: {errors}"
+                    f"Baza məhsulu: {len(df_base)} | Uğursuz match cəhdi: {errors}"
                 )
                 if tapilmayan_rows:
                     st.markdown("### Tapılmayanlar")

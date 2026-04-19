@@ -1,7 +1,6 @@
 {
   "SPECIAL_RULES_COMMON": {
-    "sunger": ["Sanitex 6li sunger", 1],
-    "pemaluks": ["Pemalux toz 400 qr", 0.4],
+    "Pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
     "tabosco": ["Tabosco (kg)", 0.06],
     "worcestershire": ["Worcestershire sauce (kg)", 0.265],
     "craft": ["Craft mehsullar (lt)", 0.7],

@@ -135,6 +135,39 @@ def _fuzz_loose(x):
     return normalize_text_loose(str(x))
 
 
+def _extract_volume_signatures(text: str) -> frozenset[str]:
+    """Çek/baza xam mətnindən həcm imzaları (l, oz). normalize_text rəqəmləri sildiyi üçün
+    uyğunluq qapısı xam sətirdən oxuyur — 0,33l vs 0,75l, 8 oz vs 12 oz, 2l."""
+    if not text:
+        return frozenset()
+    s = _nfc(str(text)).lower().replace(",", ".")
+    out: set[str] = set()
+    for m in re.finditer(r"(\d+\.\d+)\s*l\b", s):
+        out.add(f"{float(m.group(1))}l")
+    for m in re.finditer(r"(?<![\d.])(\d+)\s*l\b", s):
+        out.add(f"{float(int(m.group(1)))}l")
+    for m in re.finditer(r"(\d+)\s*oz\b", s):
+        out.add(f"{int(m.group(1))}oz")
+    return frozenset(out)
+
+
+def _volume_pack_signature_gate(q_raw: str, m_raw: str) -> bool:
+    """Həcm fərqi olan bazaya səhv birləşmənin qarşısı (Sirab 0,33 vs 0,75, oz)."""
+    ql = _nfc(str(q_raw)).lower()
+    aq = _extract_volume_signatures(q_raw)
+    am = _extract_volume_signatures(m_raw)
+    if aq and am:
+        return aq == am
+    if aq and not am:
+        return False
+    if not aq and am:
+        if "cola" in ql or "sprite" in ql:
+            return False
+        if "sirab" in ql and "premium" in ql:
+            return False
+    return True
+
+
 def _soft_word_gate(q_norm, m_norm, score, strict=False):
     q_words = [w for w in q_norm.split() if len(w) > 2]
     high = 82 if strict else 76
@@ -176,6 +209,27 @@ def _bar_drink_packaging_gate(q_norm: str, m_norm: str) -> bool:
     return True
 
 
+def _bar_and_volume_gate(q_raw: str, q_norm: str, m_raw: str, m_norm: str) -> bool:
+    return _bar_drink_packaging_gate(q_norm, m_norm) and _volume_pack_signature_gate(
+        q_raw, m_raw
+    )
+
+
+def _pick_by_volume_signature(q_raw: str, candidate_strings: list) -> str | None:
+    """Eyni normalize_text nəticəsi olan adlar arasından çek həcmi ilə tək baza sətri."""
+    if not candidate_strings:
+        return None
+    if len(candidate_strings) == 1:
+        return candidate_strings[0]
+    qs = _extract_volume_signatures(q_raw)
+    if qs:
+        ok = [c for c in candidate_strings if _extract_volume_signatures(c) == qs]
+        if len(ok) == 1:
+            return ok[0]
+        return None
+    return candidate_strings[0]
+
+
 def _match_with_processor(
     q_raw,
     choices,
@@ -196,24 +250,35 @@ def _match_with_processor(
     if not q_norm:
         return None, 0
 
-    for choice in choices:
-        if proc_fn(choice) == q_norm:
-            return str(choice), 100.0
+    norm_equal = [ch for ch in choices if proc_fn(ch) == q_norm]
+    if norm_equal:
+        gated = [
+            str(ch)
+            for ch in norm_equal
+            if _bar_and_volume_gate(q, q_norm, str(ch), proc_fn(ch))
+        ]
+        if gated:
+            picked = _pick_by_volume_signature(q, gated)
+            if picked is not None:
+                return picked, 100.0
 
     # Çox yaxın tam uyğunluq (məs. bazada «6 li» / çekdə «6li») — kiçik fərqləri tutur
     if len(choices) <= 4000 and len(q_norm) >= 6:
-        best_c = None
-        best_r = 0
+        ratio_pass: list[tuple[str, float]] = []
         for choice in choices:
             cn = proc_fn(choice)
             r = fuzz.ratio(q_norm, cn)
-            if r > best_r:
-                best_r = r
-                best_c = choice
-        if best_c is not None and best_r >= 98:
-            cn = proc_fn(best_c)
-            if _bar_drink_packaging_gate(q_norm, cn):
-                return str(best_c), float(min(best_r, 99.9))
+            if r < 98:
+                continue
+            if not _bar_and_volume_gate(q, q_norm, str(choice), cn):
+                continue
+            ratio_pass.append((str(choice), float(r)))
+        if ratio_pass:
+            max_r = max(x[1] for x in ratio_pass)
+            top = [x[0] for x in ratio_pass if x[1] == max_r]
+            picked = _pick_by_volume_signature(q, top)
+            if picked is not None:
+                return picked, float(min(max_r, 99.9))
 
     # 3+ kəlmə: WRatio tam ifadəni (məs. «sensoy sweet chili») token_set-dən yaxşı tuta bilər
     n_words = len(q_norm.split())
@@ -251,7 +316,7 @@ def _match_with_processor(
     if score < threshold:
         return None, score
 
-    if not _bar_drink_packaging_gate(q_norm, m_norm):
+    if not _bar_and_volume_gate(q, q_norm, best_match, m_norm):
         alt_found = None
         alt_score = 0.0
         for cand, sc, _ in process.extract(
@@ -269,7 +334,7 @@ def _match_with_processor(
                 q_norm, cn, scf, strict=strict_gate
             ):
                 continue
-            if not _bar_drink_packaging_gate(q_norm, cn):
+            if not _bar_and_volume_gate(q, q_norm, str(cand), cn):
                 continue
             alt_found, alt_score = str(cand), scf
             break

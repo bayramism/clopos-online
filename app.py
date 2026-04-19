@@ -508,8 +508,8 @@ with tab1:
     st.caption(
         "Mexanizm: çekdəki **Ad** ilə ana bazada **eyni məhsul adı** tapılır → export **ID** "
         "yalnız bazadandır. **QUANTITY** = çek miqdarı (xüsusi qayda varsa çevrilmiş miqdar). "
-        "**COST** = çekdə **1 vahid ₼** (sətirin ümumi miqdarına görə qiymət) **÷ Miqdar** "
-        "= **bir vahidin qiyməti** (toplama yox, bölmə). Clopos faylında bu dəyər lazımdır. "
+        "**COST** = (çekdəki vahid qiymət ÷ Miqdar) ÷ **qayda faktoru** (əgər 1-dirsə yalnız birinci bölmə): "
+        "məs. 1 paket 5 kq = 7 ₼ → çek vahidi 7 ₼, faktor 5 → **1 kq üçün 1,4 ₼**; QUANTITY 5 kq olunca sətir cəmi 7 ₼. "
         "**Təhlükəsiz rejim**: yalnız aydın uyğunluq qəbul edilir; qalanlar **Tapılmayanlar** "
         "vərəqində əl ilə doldurmaq üçündür."
     )
@@ -589,10 +589,15 @@ with tab1:
                         )
                         continue
 
-                    p_name, p_qty, _fct = apply_special_logic(o_name, o_qty, curr)
-                    # Çekdəki «1 vahid ₼» = həmin sətirdəki ümumi miqdarın qiyməti → Clopos üçün
-                    # bir vahidin qiyməti: həmin məbləğ ÷ çek miqdarı (fct yalnız miqdarı dəyişir, COST-a vurulmur).
-                    cost = (unit_price / o_qty) if o_qty != 0 else 0
+                    p_name, p_qty, fct = apply_special_logic(o_name, o_qty, curr)
+                    # Çek miqdarına görə bir fiziki vahidin (paket, ed) qiyməti; qayda ilə miqdar fct vurulanda
+                    # Clopos COST = baza vahidinin (məs. 1 kq) qiyməti → paket qiyməti / fct (7/5=1.4).
+                    price_per_cheque_unit = (unit_price / o_qty) if o_qty != 0 else 0.0
+                    cost = (
+                        (price_per_cheque_unit / fct)
+                        if fct not in (None, 0)
+                        else price_per_cheque_unit
+                    )
                     m_name, _score = get_best_match(
                         p_name,
                         choices,

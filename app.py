@@ -42,7 +42,8 @@ def normalize_text(text):
         text.replace("ç", "c")
         .replace("ə", "e")
         .replace("ğ", "g")
-        .replace("ı", "i")
+        .replace("\u0131", "i")
+        .replace("i\u0307", "i")
         .replace("ö", "o")
         .replace("ş", "s")
         .replace("ü", "u")
@@ -62,11 +63,11 @@ def normalize_text_loose(text):
         text.replace("ç", "c")
         .replace("ə", "e")
         .replace("ğ", "g")
-        .replace("ı", "i")
+        .replace("\u0131", "i")
         .replace("ö", "o")
         .replace("ş", "s")
         .replace("ü", "u")
-        .replace("i̇", "i")
+        .replace("i\u0307", "i")
     )
     return " ".join(text.split())
 
@@ -318,7 +319,7 @@ def standardize_columns(df):
 
 
 def normalize_restaurant_name(name):
-    return str(name).lower().replace("ı", "i").replace("i̇", "i").strip()
+    return str(name).lower().replace("\u0131", "i").replace("i\u0307", "i").strip()
 
 
 def discover_restaurants():
@@ -607,11 +608,8 @@ with tab1:
                         f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                         key="download_um_only_fail",
                     )
-                sample = (
-                    df_c[["ad", "miqdar"]]
-                    .dropna(subset=["ad"])
-                    .head(10)
-                    .rename(columns={"ad": "Çekdə ad", "miqdar": "Miqdar"})
+                sample = df_c[["ad", "miqdar"]].dropna(subset=["ad"]).head(10).rename(
+                    columns={"ad": "Çekdə ad", "miqdar": "Miqdar"}
                 )
                 if not sample.empty:
                     st.markdown("İlk 10 çek adı (baza ilə vizual müqayisə üçün):")

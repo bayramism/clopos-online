@@ -6,6 +6,7 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+from openpyxl.styles import Font
 from rapidfuzz import fuzz, process
 
 from rules import merged_special_rules  # ümumi + restoran qaydaları
@@ -387,21 +388,25 @@ def build_export_file_name(restaurant, category):
     return f"clopos_{restaurant_tag}_{category_tag}_{timestamp}.xlsx"
 
 
+def _excel_sheet_no_bold(writer, sheet_name):
+    """Bütün xanalar normal şrift — ID/QUANTITY/COST başlığı da qalın olmasın."""
+    ws = writer.sheets[sheet_name]
+    plain = Font(bold=False)
+    for row in ws.iter_rows(
+        min_row=1,
+        max_row=ws.max_row,
+        min_col=1,
+        max_col=ws.max_column,
+    ):
+        for cell in row:
+            cell.font = plain
+
+
 def to_bold_excel_bytes(dataframe):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         dataframe.to_excel(writer, index=False, sheet_name="CLOPOS")
-    output.seek(0)
-    return output.getvalue()
-
-
-def to_clopos_workbook_bytes(clopos_df, unmatched_df=None):
-    """CLOPOS + istəyə görə Tapılmayanlar vərəqi (ASCII ad — Excel uyğunluğu)."""
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        clopos_df.to_excel(writer, index=False, sheet_name="CLOPOS")
-        if unmatched_df is not None and not unmatched_df.empty:
-            unmatched_df.to_excel(writer, index=False, sheet_name="Tapilmayanlar")
+        _excel_sheet_no_bold(writer, "CLOPOS")
     output.seek(0)
     return output.getvalue()
 
@@ -411,6 +416,7 @@ def to_tapilmayan_only_bytes(unmatched_df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         unmatched_df.to_excel(writer, index=False, sheet_name="Tapilmayanlar")
+        _excel_sheet_no_bold(writer, "Tapilmayanlar")
     output.seek(0)
     return output.getvalue()
 
@@ -773,8 +779,14 @@ with tab1:
                 )
 
             export_name = build_export_file_name(curr, cat)
-            export_bytes = to_clopos_workbook_bytes(
-                res_df, um_df if not um_df.empty else None
+            export_bytes = to_bold_excel_bytes(res_df)
+            um_bytes = (
+                to_tapilmayan_only_bytes(um_df) if not um_df.empty else None
+            )
+            um_name = (
+                f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                if um_bytes
+                else None
             )
             st.session_state.last_export = {
                 "restaurant": curr,
@@ -783,18 +795,20 @@ with tab1:
                 "unmatched": len(um_df),
                 "file_name": export_name,
                 "file_bytes": export_bytes,
+                "unmatched_bytes": um_bytes,
+                "unmatched_file_name": um_name,
                 "preview_df": res_df,
             }
             st.success(
-                f"Hazır fayl: `{export_name}`"
+                f"Clopos import: `{export_name}`"
                 + (
-                    f" — CLOPOS + **Tapılmayanlar** vərəqi ({len(um_df)} sətir)."
+                    f" — əlavə olaraq **Tapılmayanlar** üçün ayrı Excel ({len(um_df)} sətir) endir."
                     if not um_df.empty
                     else "."
                 )
             )
             st.download_button(
-                "📥 CLOPOS + Tapılmayanlar (bir Excel)",
+                "📥 Clopos import (yalnız ID, QUANTITY, COST)",
                 export_bytes,
                 export_name,
                 key="download_current",
@@ -815,17 +829,26 @@ with tab1:
         )
         if saved_export.get("unmatched"):
             st.caption(
-                f"Son exportda **Tapılmayanlar** vərəqi: **{saved_export['unmatched']}** sətir "
-                "(faylda ikinci vərəq)."
+                f"Son analizdə **tapılmayan** sətir: **{saved_export['unmatched']}** — Clopos faylına "
+                "daxil edilmir; ayrıca Excel aşağıdan endir."
             )
-        st.write(f"Fayl adı: `{saved_export['file_name']}`")
+        st.write(f"Clopos faylı: `{saved_export['file_name']}`")
         st.dataframe(saved_export["preview_df"], use_container_width=True)
         st.download_button(
-            "📥 Son faylı yenidən endir",
+            "📥 Clopos faylını yenidən endir",
             saved_export["file_bytes"],
             saved_export["file_name"],
             key="download_saved",
         )
+        ub = saved_export.get("unmatched_bytes")
+        ufn = saved_export.get("unmatched_file_name")
+        if ub and ufn:
+            st.download_button(
+                "📥 Tapılmayanlar faylını yenidən endir",
+                ub,
+                ufn,
+                key="download_saved_um",
+            )
 
 with tab2:
     ctrl_cat = st.selectbox(

@@ -524,8 +524,8 @@ def discover_restaurants():
     return sorted(restaurants) if restaurants else ["ROOM", "BIBLIOTEKA", "FINESTRA"]
 
 
-def _resolve_db_path(res_name, category):
-    suffix = "horeca" if category == "Horeca" else "dk"
+def _resolve_db_path_for_suffix(res_name, suffix: str):
+    """suffix: 'horeca' və ya 'dk' — fayl adı ana_<restoran>_<suffix>."""
     target_prefix = f"ana_{normalize_restaurant_name(res_name)}_{suffix}"
     for file_name in os.listdir("."):
         normalized_file = normalize_restaurant_name(file_name)
@@ -535,9 +535,7 @@ def _resolve_db_path(res_name, category):
     return None
 
 
-@st.cache_data(ttl=30, show_spinner=False)
-def get_db(res_name, category):
-    path = _resolve_db_path(res_name, category)
+def _read_single_db_path(path):
     if not path:
         return None
     try:
@@ -546,6 +544,24 @@ def get_db(res_name, category):
         return pd.read_csv(path)
     except Exception:
         return None
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_db(res_name, category):
+    """Horeca: yalnız *_horeca. Dark Kitchen: *_dk + *_horeca birləşik (eyni Ad təkrarlanmasa, dk üstün)."""
+    if category == "Horeca":
+        return _read_single_db_path(_resolve_db_path_for_suffix(res_name, "horeca"))
+    parts = []
+    for suffix in ("dk", "horeca"):
+        df = _read_single_db_path(_resolve_db_path_for_suffix(res_name, suffix))
+        if df is not None and not df.empty:
+            parts.append(df)
+    if not parts:
+        return None
+    out = pd.concat(parts, ignore_index=True)
+    if "ad" in out.columns:
+        out = out.drop_duplicates(subset=["ad"], keep="first")
+    return out
 
 
 def build_export_file_name(restaurant, category):
@@ -697,7 +713,8 @@ with tab1:
         "**COST** = (çekdəki vahid qiymət ÷ Miqdar) ÷ **qayda faktoru** (əgər 1-dirsə yalnız birinci bölmə): "
         "məs. 1 paket 5 kq = 7 ₼ → çek vahidi 7 ₼, faktor 5 → **1 kq üçün 1,4 ₼**; QUANTITY 5 kq olunca sətir cəmi 7 ₼. "
         "**Təhlükəsiz rejim**: yalnız aydın uyğunluq qəbul edilir; qalanlar **Tapılmayanlar** "
-        "vərəqində əl ilə doldurmaq üçündür."
+        "vərəqində əl ilə doldurmaq üçündür. **Dark Kitchen** üçün ana baza həm `ana_<rest>_dk`, "
+        "həm `ana_<rest>_horeca` faylından oxunur və birləşdirilir; **Horeca** üçün yalnız `_horeca`."
     )
     col_a, col_b, col_c = st.columns([1, 1, 1])
     cat = col_a.selectbox("Sahə:", ["Horeca", "Dark Kitchen"])
@@ -1009,8 +1026,16 @@ with tab1:
                 key="download_current",
             )
         else:
+            dk_hint = (
+                " **Dark Kitchen** üçün ən azı biri olmalıdır: `ana_<restoran>_dk` və/və ya "
+                "`ana_<restoran>_horeca`."
+                if cat == "Dark Kitchen"
+                else " **Horeca** üçün `ana_<restoran>_horeca` faylı lazımdır."
+            )
             st.markdown(
-                "**Problem:** Uyğun ana baza tapılmadı. Repo daxilində fayl adı `ana_<restoran>_<horeca/dk>` formatında olmalıdır."
+                "**Problem:** Uyğun ana baza tapılmadı. Repo kökündə fayl adı `ana_<restoran>_horeca` "
+                "və ya `ana_<restoran>_dk` formatında olmalıdır."
+                + dk_hint
             )
 
     saved_export = st.session_state.get("last_export")

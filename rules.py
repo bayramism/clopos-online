@@ -50,12 +50,19 @@ SPECIAL_RULES_COMMON, SPECIAL_RULES_BY_RESTAURANT = _load_tables()
 
 
 def merged_special_rules(restaurant: str) -> dict:
+    """COMMON + digər restoranların (çatışmayan açarlar) + son seçilmiş restoran üstündür.
+    ROOM seçilib BIBLIOTEKA qaydaları COMMON-da yoxdursa, yenə tətbiq olunur."""
     rk = _rules_rest_key(restaurant)
-    per = SPECIAL_RULES_BY_RESTAURANT.get(rk) or {}
-    out = dict(per)
-    for k, v in SPECIAL_RULES_COMMON.items():
-        if k not in out:
-            out[k] = v
+    out = dict(SPECIAL_RULES_COMMON)
+    for rname, block in sorted(SPECIAL_RULES_BY_RESTAURANT.items()):
+        if _rules_rest_key(rname) == rk:
+            continue
+        for k, v in (block or {}).items():
+            if k not in out:
+                out[k] = v
+    sel = SPECIAL_RULES_BY_RESTAURANT.get(rk) or {}
+    for k, v in sel.items():
+        out[k] = v
     return out
 
 

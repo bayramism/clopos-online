@@ -1,14 +1,21 @@
 {
   "SPECIAL_RULES_COMMON": {
     "tabosco": ["Tabosco (kg)", 0.06],
-    "worcestershire": ["Worcestershire sauce (kg)", 0.265],
-    "craft": ["Craft mehsullar (lt)", 0.7],
+    "Worcestershire sauce (kg)": ["Worcestershire sauce (kg)", 0.265],
     "Sandora Albali (ed)": ["Juice (l)", 1],
+    "Sandora Tomat (ed)": ["Juice (l)", 1],
+    "Sandora Greyfrut (ed)": ["Juice (l)", 1],
     "Sandora Shaftali (ed)": ["Juice (l)", 1],
     "Sandora Ananas (ed)": ["Juice (l)", 1],
     "Sandora Alma (ed)": ["Juice (l)", 1],
     "Sandora Portagal -mandarin": ["Juice (l)", 1],
-    "Sandora gilemeyve": ["Juice (l)", 1]
+    "Sandora gilemeyve": ["Juice (l)", 1],
+    "Dry Gin Craft 0,7l (ed)": ["Dry Gin Craft 0,7l (ed)", 0.7],
+    "White Rum Craft 0,7l (ed)": ["White Rum Craft 0,7l (ed)", 0.7],
+    "Vodka Craft 0,7l (ed)": ["Vodka Craft 0,7l (ed)", 0.7],
+    "Triple Sec Craft 0,7l (ed)": ["Triple Sec Craft 0,7l (ed)", 0.7],
+    "Peach Schnaps Craft 0,7l (ed)": ["Peach Schnaps Craft 0,7l (ed)", 0.7],
+    "MeyValley Nastoyka 0,7l (ed)": ["MeyValley Nastoyka 0,7l (ed)", 0.7]
   },
   "SPECIAL_RULES_BY_RESTAURANT": {
     "BIBLIOTEKA": {

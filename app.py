@@ -8,7 +8,7 @@ import streamlit as st
 from openpyxl.styles import Font
 from rapidfuzz import fuzz, process
 
-from rules import SPECIAL_RULES  # Qaydaları digər fayldan çəkir
+from rules import merged_special_rules  # ümumi + restoran qaydaları
 
 st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
 
@@ -66,16 +66,18 @@ def normalize_text_loose(text):
     return " ".join(text.split())
 
 
-def apply_special_logic(name, qty):
+def apply_special_logic(name, qty, restaurant: str):
     """rules.py açarı çek adının içində (normallaşdırılmış) axtarır.
-    1) sıx + loose alt-sətir; 2) token_set yüksək olduqda (fərqli yazılış)."""
+    1) sıx + loose alt-sətir; 2) token_set yüksək olduqda (fərqli yazılış).
+    Qaydalar: merged_special_rules(restaurant) — ümumi + həmin restoran."""
     if not name or not str(name).strip():
         return name, qty, 1
     raw = str(name).strip()
     n_strict = normalize_text(raw)
     n_loose = normalize_text_loose(raw)
+    rules = merged_special_rules(restaurant)
 
-    for key, val in SPECIAL_RULES.items():
+    for key, val in rules.items():
         ks = normalize_text(str(key))
         kl = normalize_text_loose(str(key))
         if ks and (ks in n_strict or ks in n_loose):
@@ -83,7 +85,7 @@ def apply_special_logic(name, qty):
         if kl and (kl in n_loose or kl in n_strict):
             return val[0], qty * val[1], val[1]
 
-    for key, val in SPECIAL_RULES.items():
+    for key, val in rules.items():
         ks = normalize_text(str(key))
         if len(ks) < 3:
             continue
@@ -384,7 +386,7 @@ with tab1:
                     if o_qty == 0:
                         continue
 
-                    p_name, p_qty, _fct = apply_special_logic(o_name, o_qty)
+                    p_name, p_qty, _fct = apply_special_logic(o_name, o_qty, curr)
                     # Çekdəki «1 vahid ₼» = həmin sətirdəki ümumi miqdarın qiyməti → Clopos üçün
                     # bir vahidin qiyməti: həmin məbləğ ÷ çek miqdarı (fct yalnız miqdarı dəyişir, COST-a vurulmur).
                     cost = (unit_price / o_qty) if o_qty != 0 else 0
@@ -562,7 +564,7 @@ with tab2:
             missing = []
             for _, row in df_o.iterrows():
                 name = str(row.get("ad", ""))
-                p_name, _, _ = apply_special_logic(name, 1)
+                p_name, _, _ = apply_special_logic(name, 1, curr)
                 m_name, _ = get_best_match(
                     p_name, db["ad"].astype(str).str.strip().tolist(), threshold=72
                 )

@@ -50,18 +50,12 @@ SPECIAL_RULES_COMMON, SPECIAL_RULES_BY_RESTAURANT = _load_tables()
 
 
 def merged_special_rules(restaurant: str) -> dict:
-    """COMMON + digər restoranların (çatışmayan açarlar) + son seçilmiş restoran üstündür.
-    Hər çağırışda `rules_data.json` diskdən yenidən oxunur — Streamlit prosesi işləyərkən
-    JSON redaktəsi köhnə import yaddaşında qalmır."""
+    """COMMON + yalnız **seçilmiş restoran** bloku (digər restoran qaydaları birləşdirilmir).
+    BIBLIOTEKA-ya məxsus qayda FINESTRA-da tətbiq olunmasın deyə belədir.
+    Hər çağırışda JSON diskdən yenidən oxunur."""
     common, by_rest = _load_tables()
     rk = _rules_rest_key(restaurant)
     out = dict(common)
-    for rname, block in sorted(by_rest.items()):
-        if _rules_rest_key(rname) == rk:
-            continue
-        for k, v in (block or {}).items():
-            if k not in out:
-                out[k] = v
     sel = by_rest.get(rk) or {}
     for k, v in sel.items():
         out[k] = v

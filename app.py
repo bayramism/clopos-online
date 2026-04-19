@@ -90,8 +90,7 @@ def _all_rule_key_tokens_in_receipt(ks: str, n_strict: str) -> bool:
 def apply_special_logic(name, qty, restaurant: str):
     """rules.py açarı çek adının içində (normallaşdırılmış) axtarır.
     1) sıx + loose alt-sətir; 2) token_set yüksək olduqda (fərqli yazılış).
-    Qaydalar: merged_special_rules(restaurant) — COMMON, sonra digər restoranlar
-    (COMMON-da olmayan açarlar), ən sonda seçilmiş restoran üstündür."""
+    Qaydalar: merged_special_rules(restaurant) — COMMON + yalnız həmin restoran."""
     if not name or not str(name).strip():
         return name, qty, 1
     raw = str(name).strip()
@@ -121,6 +120,10 @@ def apply_special_logic(name, qty, restaurant: str):
             continue
         # 2+ kəlməli açar: bütün kəlmələr çekdə token kimi olmalı (yanlış Juice tutulmasının qarşısı)
         if len(ks.split()) >= 2 and not _all_rule_key_tokens_in_receipt(ks, n_strict):
+            continue
+        rk_sig = _extract_volume_signatures(str(key))
+        rec_sig = _extract_volume_signatures(raw)
+        if rk_sig and rk_sig != rec_sig:
             continue
         return str(val[0]).strip(), qty * val[1], val[1]
 

@@ -1,5 +1,6 @@
 {
   "SPECIAL_RULES_COMMON": {
+    "pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
     "Pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
     "tabosco": ["Tabosco (kg)", 0.06],
     "worcestershire": ["Worcestershire sauce (kg)", 0.265],
@@ -22,7 +23,7 @@
       "narsherab": ["Narsherab (kg)", 0.345],
       "sirab qazli": ["Sirab Qazli (kg)", 0.5],
       "Tsar un": ["Tsar un (kg)", 5],
-      "Zire Zeytun yagi 1l (ed)": ["Zeytun Yag 1l (ed)", 1],
+      "Zire zeytun yagi": ["Zeytun Yag 1l (ed)", 1],
       "borges zeytun yagi": ["Zeytun Yag 1l (ed)", 1],
       "cola 2l": ["cola 2l", 2],
       "sprite 2l": ["sprite 2l", 2],
@@ -47,6 +48,3 @@
       "Final Qargidali Yag 5l (ed)": ["Final Qargidali Yag 5l (ed)", 5],
       "Kent bulyon 90qr (ed)": ["Kent bulyon 90qr (ed)", 0.09],
       "Marini Savoiardi 400gr (ed)": ["Tiramisu pecenye 400 gr", 0.4]
-    }
-  }
-}

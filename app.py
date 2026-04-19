@@ -609,3 +609,173 @@ with tab1:
                     )
                 sample = (
                     df_c[["ad", "miqdar"]]
+                    .dropna(subset=["ad"])
+                    .head(10)
+                    .rename(columns={"ad": "Çekdə ad", "miqdar": "Miqdar"})
+                )
+                if not sample.empty:
+                    st.markdown("İlk 10 çek adı (baza ilə vizual müqayisə üçün):")
+                    st.dataframe(sample, use_container_width=True)
+                if fail_debug:
+                    dbg_df = pd.DataFrame(fail_debug)
+                    with st.expander(
+                        "Diaqnostika: hər sətir üçün bazadan ən yaxın 2 variant (xal aşağıdırsa həddi sal)",
+                        expanded=True,
+                    ):
+                        st.dataframe(dbg_df, use_container_width=True)
+                    dbg_bytes = to_bold_excel_bytes(
+                        dbg_df.rename(
+                            columns={
+                                "Çekdə ad": "cek_ad",
+                                "Qaydadan sonra": "qayda_sonra",
+                                "Ən yaxın (token_set)": "en_yaxin_1",
+                                "Xal": "xal_1",
+                                "2-ci": "en_yaxin_2",
+                                "2 xal": "xal_2",
+                                "Loose 1": "loose_1",
+                                "Loose xal": "loose_xal",
+                            }
+                        )
+                    )
+                    st.download_button(
+                        "📥 Diaqnostika cədvəlini Excel kimi endir",
+                        dbg_bytes,
+                        f"clopos_diag_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        key="download_diag",
+                    )
+                st.caption(
+                    "Əsas export yalnız ən azı bir sətir uğurla uyğunlaşanda çıxır. "
+                    "Yuxarıdakı sürgü ilə həddi azaldıb ⚡ Başlat-a yenidən bas."
+                )
+                st.stop()
+
+            res_df = (
+                pd.DataFrame(final_list)
+                .groupby("ID", as_index=False)
+                .agg({"QUANTITY": "sum", "LINE_TOTAL": "sum"})
+            )
+            res_df["COST"] = (res_df["LINE_TOTAL"] / res_df["QUANTITY"]).round(4)
+            res_df = res_df[["ID", "QUANTITY", "COST"]]
+
+            st.success(f"{len(res_df)} məhsul hazırlandı.")
+            if errors:
+                st.info(
+                    f"{errors} sətir avtomatik tutulmadı — **Tapılmayanlar** bölməsində əl ilə işləyin."
+                )
+
+            st.dataframe(res_df, use_container_width=True)
+
+            um_df = pd.DataFrame(tapilmayan_rows) if tapilmayan_rows else pd.DataFrame()
+            if not um_df.empty:
+                st.markdown("### Tapılmayanlar")
+                st.caption(
+                    "Bu sətirlər təhlükəsiz rejimdə baza ilə avtomatik birləşdirilmədi (və ya uyğunluq "
+                    "şübhəli sayıldı). **ID_əl_ile** / **Baza_Adı_əl_ile** sütunlarını Exceldə doldurub "
+                    "sonra `rules.py`-ə qayda əlavə edin və ya bazanı yeniləyin."
+                )
+                st.dataframe(um_df, use_container_width=True)
+                st.download_button(
+                    "📥 Yalnız Tapılmayanlar (Excel)",
+                    to_tapilmayan_only_bytes(um_df),
+                    f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    key="download_um_only_ok",
+                )
+
+            export_name = build_export_file_name(curr, cat)
+            export_bytes = to_clopos_workbook_bytes(
+                res_df, um_df if not um_df.empty else None
+            )
+            st.session_state.last_export = {
+                "restaurant": curr,
+                "category": cat,
+                "rows": len(res_df),
+                "unmatched": len(um_df),
+                "file_name": export_name,
+                "file_bytes": export_bytes,
+                "preview_df": res_df,
+            }
+            st.success(
+                f"Hazır fayl: `{export_name}`"
+                + (
+                    f" — CLOPOS + **Tapılmayanlar** vərəqi ({len(um_df)} sətir)."
+                    if not um_df.empty
+                    else "."
+                )
+            )
+            st.download_button(
+                "📥 CLOPOS + Tapılmayanlar (bir Excel)",
+                export_bytes,
+                export_name,
+                key="download_current",
+            )
+        else:
+            st.error(
+                "Uyğun ana baza tapılmadı. Repo daxilində fayl adı `ana_<restoran>_<horeca/dk>` formatında olmalıdır."
+            )
+
+    saved_export = st.session_state.get("last_export")
+    if saved_export:
+        st.markdown("---")
+        st.markdown("### Son hazırlanmış fayl")
+        st.write(
+            f"Restoran: **{saved_export['restaurant']}** | "
+            f"Sahə: **{saved_export['category']}** | "
+            f"Sətir sayı: **{saved_export['rows']}**"
+        )
+        if saved_export.get("unmatched"):
+            st.caption(
+                f"Son exportda **Tapılmayanlar** vərəqi: **{saved_export['unmatched']}** sətir "
+                "(faylda ikinci vərəq)."
+            )
+        st.write(f"Fayl adı: `{saved_export['file_name']}`")
+        st.dataframe(saved_export["preview_df"], use_container_width=True)
+        st.download_button(
+            "📥 Son faylı yenidən endir",
+            saved_export["file_bytes"],
+            saved_export["file_name"],
+            key="download_saved",
+        )
+
+with tab2:
+    ctrl_cat = st.selectbox(
+        "Kontrol üçün baza sahəsi:",
+        ["Horeca", "Dark Kitchen"],
+        key="tab2_cat",
+    )
+    f_orig = st.file_uploader("1. Orijinal Çek", type=["xlsx"], key="ko")
+    f_bot = st.file_uploader("2. Analiz Faylı", type=["xlsx"], key="kb")
+    if f_orig and f_bot and st.button("🔍 Yoxla"):
+        df_o, df_b = pd.read_excel(f_orig), pd.read_excel(f_bot)
+        df_o = standardize_columns(df_o)
+        df_b = standardize_columns(df_b)
+        db = get_db(curr, ctrl_cat)
+        if db is not None:
+            db = standardize_columns(db)
+            db["ad"] = db["ad"].astype(str).str.strip()
+            db["id"] = pd.to_numeric(db["id"], errors="coerce")
+            db = db.dropna(subset=["id", "ad"])
+            db["id"] = db["id"].astype(int)
+            db = db.drop_duplicates(subset=["ad"], keep="first")
+            if "id" not in df_b.columns:
+                st.error("Analiz faylında `ID` / `id` sütunu tapılmadı.")
+                st.stop()
+            bot_ids = set(df_b["id"].astype(int).tolist())
+            missing = []
+            for _, row in df_o.iterrows():
+                name = str(row.get("ad", ""))
+                p_name, _, _ = apply_special_logic(name, 1, curr)
+                m_name, _ = get_best_match(
+                    p_name,
+                    db["ad"].astype(str).str.strip().tolist(),
+                    threshold=74,
+                    safe_mode=True,
+                )
+                if m_name:
+                    tid = _first_id_for_name(db, m_name)
+                    if tid not in bot_ids:
+                        missing.append(name)
+                else:
+                    missing.append(f"{name} (Bazada yoxdur)")
+            st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
+        else:
+            st.error("Uyğun ana baza tapılmadı.")

@@ -6,7 +6,6 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
-from openpyxl.styles import Font
 from rapidfuzz import fuzz, process
 
 from rules import merged_special_rules  # ümumi + restoran qaydaları
@@ -392,9 +391,6 @@ def to_bold_excel_bytes(dataframe):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         dataframe.to_excel(writer, index=False, sheet_name="CLOPOS")
-        sheet = writer.sheets["CLOPOS"]
-        for cell in sheet[1]:
-            cell.font = Font(bold=True)
     output.seek(0)
     return output.getvalue()
 
@@ -404,14 +400,8 @@ def to_clopos_workbook_bytes(clopos_df, unmatched_df=None):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         clopos_df.to_excel(writer, index=False, sheet_name="CLOPOS")
-        ws = writer.sheets["CLOPOS"]
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
         if unmatched_df is not None and not unmatched_df.empty:
             unmatched_df.to_excel(writer, index=False, sheet_name="Tapilmayanlar")
-            ws2 = writer.sheets["Tapilmayanlar"]
-            for cell in ws2[1]:
-                cell.font = Font(bold=True)
     output.seek(0)
     return output.getvalue()
 
@@ -421,9 +411,6 @@ def to_tapilmayan_only_bytes(unmatched_df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         unmatched_df.to_excel(writer, index=False, sheet_name="Tapilmayanlar")
-        ws = writer.sheets["Tapilmayanlar"]
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
     output.seek(0)
     return output.getvalue()
 

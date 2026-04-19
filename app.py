@@ -146,6 +146,36 @@ def _soft_word_gate(q_norm, m_norm, score, strict=False):
     return fuzz.partial_ratio(q_norm, m_norm) >= pr_min
 
 
+def _bar_drink_packaging_gate(q_norm: str, m_norm: str) -> bool:
+    """Bar içkiləri: Cola vs Cola 2l, Sirab Premium vs Sirab Qazli token_set qarışıqlığı."""
+    if not q_norm or not m_norm:
+        return True
+    qc = q_norm.replace(" ", "")
+    mc = m_norm.replace(" ", "")
+    for needle in ("premium", "zero"):
+        if needle in q_norm and needle not in m_norm:
+            return False
+    for needle in ("2l", "19l"):
+        if needle in qc and needle not in mc:
+            return False
+    if "sirab" in q_norm and "premium" not in q_norm and "premium" in m_norm:
+        return False
+    if ("cola" in q_norm or "sprite" in q_norm) and "2l" not in qc and "2l" in mc:
+        return False
+    if ("cola" in q_norm or "sprite" in q_norm) and "2l" in qc and "2l" not in mc:
+        return False
+    if "sirab" in q_norm:
+        q_li = "qazli" in q_norm
+        q_siz = "qazsiz" in q_norm
+        m_li = "qazli" in m_norm
+        m_siz = "qazsiz" in m_norm
+        if q_li and (not q_siz) and m_siz and (not m_li):
+            return False
+        if q_siz and m_li and (not m_siz):
+            return False
+    return True
+
+
 def _match_with_processor(
     q_raw,
     choices,
@@ -181,7 +211,9 @@ def _match_with_processor(
                 best_r = r
                 best_c = choice
         if best_c is not None and best_r >= 98:
-            return str(best_c), float(min(best_r, 99.9))
+            cn = proc_fn(best_c)
+            if _bar_drink_packaging_gate(q_norm, cn):
+                return str(best_c), float(min(best_r, 99.9))
 
     # 3+ kəlmə: WRatio tam ifadəni (məs. «sensoy sweet chili») token_set-dən yaxşı tuta bilər
     n_words = len(q_norm.split())
@@ -218,6 +250,33 @@ def _match_with_processor(
 
     if score < threshold:
         return None, score
+
+    if not _bar_drink_packaging_gate(q_norm, m_norm):
+        alt_found = None
+        alt_score = 0.0
+        for cand, sc, _ in process.extract(
+            q,
+            choices,
+            scorer=primary_scorer,
+            processor=proc_fn,
+            limit=35,
+        ):
+            scf = float(sc)
+            if scf < threshold:
+                continue
+            cn = proc_fn(cand)
+            if not skip_word_gate and not _soft_word_gate(
+                q_norm, cn, scf, strict=strict_gate
+            ):
+                continue
+            if not _bar_drink_packaging_gate(q_norm, cn):
+                continue
+            alt_found, alt_score = str(cand), scf
+            break
+        if alt_found is None:
+            return None, score
+        best_match, score, m_norm = alt_found, alt_score, proc_fn(alt_found)
+        used_alt_scorer = True
 
     # İki baza sətri eyni xala yaxındırsa — səhv seçim riski; çox yüksək xalda margin tətbiq olunmur
     if (

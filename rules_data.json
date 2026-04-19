@@ -1,7 +1,5 @@
 {
   "SPECIAL_RULES_COMMON": {
-    "pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
-    "Pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
     "tabosco": ["Tabosco (kg)", 0.06],
     "worcestershire": ["Worcestershire sauce (kg)", 0.265],
     "craft": ["Craft mehsullar (lt)", 0.7],
@@ -50,6 +48,8 @@
       "Marini Savoiardi 400gr (ed)": ["Tiramisu pecenye 400 gr", 0.4],
       "Sensoy Sweet Chili Mango 320gr (ed)": ["Sensoy Sweet Chili Mango 320gr (ed)", 0.32],
       "Sanitex 6li sunger": ["Qab qubkasi (ed)", 1],
+      "pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
+      "Pemalux toz 400 qr": ["Pemalux toz 400 qr", 0.4],
     }
   }
 }

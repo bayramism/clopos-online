@@ -1,13 +1,59 @@
 # Çekdəki ad bu lüğətdəki açarla uyğun gələndə: (bazada axtarılacaq ad, miqdar əmsalı)
 # FORMAT: "Çekdə görünən hissə": ("Bazadakı dəqiq ad", əmsal)
 #
-# Vacib:
-# - Əvvəl daha DƏQİQ / uzun açarları yazın, sonra qısa ümumi sözləri (məs. "cola" sona).
-# - Açarda çekdəki fərqli yazılışın özünü yazın (məs. "salami toskano" / "toscano").
-# - Əmsal 1 = miqdar dəyişmir; 0.5 = yarısı və s.
+# — SPECIAL_RULES_COMMON: bütün restoranlara şamil olunur (təkrar yazmırsan).
+# — SPECIAL_RULES_BY_RESTAURANT: yalnız həmin restoran üçün əlavə və ya eyni açarda
+#   ümumi qaydanı əvəzləyir (restoran sətiri üstün gəlir).
+# Açar sırası: əvvəl restoran lüğəti, sonra ümumidə olmayan açarlar — ilk uyğun qalibdir.
+#
+# Restoran açarı paneldəki adla eyni olmalıdır (məs. ROOM, BIBLIOTEKA, FINESTRA) — böyük hərf.
 
-SPECIAL_RULES = {
-    "avokado": ("Avocado new", 1)
+from __future__ import annotations
+
+
+def _rules_rest_key(restaurant: str) -> str:
+    return (
+        str(restaurant or "")
+        .lower()
+        .replace("ı", "i")
+        .replace("i̇", "i")
+        .strip()
+        .upper()
+    )
+
+
+def merged_special_rules(restaurant: str) -> dict:
+    """Ümumi qaydalar + seçilmiş restoran qaydaları (eyni açarda restoran üstündür)."""
+    rk = _rules_rest_key(restaurant)
+    per = SPECIAL_RULES_BY_RESTAURANT.get(rk) or {}
+    out = dict(per)
+    for k, v in SPECIAL_RULES_COMMON.items():
+        if k not in out:
+            out[k] = v
+    return out
+
+
+# --- Bütün restoranlar üçün (təkrarlamamaq üçün bura yaz) ---
+SPECIAL_RULES_COMMON = {
+    "sunger": ("Sanitex 6li sunger", 1),
+    "tabosco": ("Tabosco (kg)", 0.06),
+    "worcestershire": ("Worcestershire sauce (kg)", 0.265),
+    "craft": ("Craft mehsullar (lt)", 0.7),
+    "Sandora Albali (ed)": ("Juice (l)", 1),
+    "Sandora Shaftali (ed)": ("Juice (l)", 1),
+    "Sandora Ananas (ed)": ("Juice (l)", 1),
+    "Sandora Alma (ed)": ("Juice (l)", 1),
+    "Sandora Portagal -mandarin": ("Juice (l)", 1),
+    "Sandora gilemeyve": ("Juice (l)", 1),
+},
+
+# --- Yalnız həmin restoran + ümumi ilə birləşəndə (boş ola bilər) ---
+SPECIAL_RULES_BY_RESTAURANT: dict[str, dict] = {
+    # "ROOM": {
+    #     "lokal mehsul": ("Bazada dəqiq ad", 1),
+    # },
+"BIBLIOTEKA": {
+    "avokado": ("Avocado new", 1),
     "mango": ("Mango new", 1),
     "kelem": ("Kelem", 1),
     "sunger": ("Sanitex 6li sunger", 1),
@@ -17,12 +63,9 @@ SPECIAL_RULES = {
     "Qaymaq Petmol 33%": ("Qaymaq Petmol 33% (kg)", 0.5),
     "narsherab": ("Narsherab (kg)", 0.345),
     "sirab qazli": ("Sirab Qazli (kg)", 0.5),
-    "tabosco": ("Tabosco (kg)", 0.06),
-    "Worcestershire sauce": ("Worcestershire sauce (kg)", 0.265),
     "Tsar un": ("Tsar un (kg)", 5),
     "zire zeytun yagi": ("Zeytun Yağı", 1),
     "borges zeytun yagi": ("Zeytun Yağı", 1),
-    "craft": ("Craft mehsullar (lt)", 0.7),
     "cola 2l": ("cola 2l", 2),
     "sprite 2l": ("sprite 2l", 2),
     "ice cream": ("Ice cream Room (kq)", 1),
@@ -33,10 +76,7 @@ SPECIAL_RULES = {
     "Mara Balsamic Vinegar 0,5l (ed)": ("Mara Balsamic Vinegar 0,5l (ed)", 0.5),
     "Osvejitel": ("Air Wick 260ml (ed)", 1),
     "Bonduelle Tumsuz Qara Zeytun 300g (ed)": ("Bonduelle Tumsuz Qara Zeytun 300g (ed)", 0.11),
-    "Sandora Albali (ed)": ("Juice (l)", 1),
-    "Sandora Shaftali (ed)": ("Juice (l)", 1),
-    "Sandora Ananas (ed)": ("Juice (l)", 1),
-    "Sandora Alma (ed)": ("Juice (l)", 1),
-    "Sandora Portagal -mandarin": ("Juice (l)", 1),
-    "Sandora gilemeyve": ("Juice (l)", 1),
+},
 
+# Köhnə importlar üçün: yalnız ümumi siyahı (restoran birləşməsi app-də merged_special_rules ilə)
+SPECIAL_RULES = SPECIAL_RULES_COMMON

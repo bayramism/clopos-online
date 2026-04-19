@@ -90,7 +90,8 @@ def _all_rule_key_tokens_in_receipt(ks: str, n_strict: str) -> bool:
 def apply_special_logic(name, qty, restaurant: str):
     """rules.py açarı çek adının içində (normallaşdırılmış) axtarır.
     1) sıx + loose alt-sətir; 2) token_set yüksək olduqda (fərqli yazılış).
-    Qaydalar: merged_special_rules(restaurant) — ümumi + həmin restoran."""
+    Qaydalar: merged_special_rules(restaurant) — COMMON, sonra digər restoranlar
+    (COMMON-da olmayan açarlar), ən sonda seçilmiş restoran üstündür."""
     if not name or not str(name).strip():
         return name, qty, 1
     raw = str(name).strip()
@@ -308,7 +309,8 @@ def parse_az_number(val):
         return 0.0
 
 
-def standardize_columns(df):
+def standardize_columns(df, chek_fayli=False):
+    """chek_fayli=True: sklad çekindəki sətir «ID» sütunu bazanın Clopos id-si ilə qarışmasın."""
     df = df.copy()
     df.columns = [str(c).strip().lstrip("\ufeff") for c in df.columns]
     renamed = {}
@@ -334,7 +336,7 @@ def standardize_columns(df):
         elif any(k in key for k in ["qiym", "azn"]) or "₼" in col_l:
             renamed[col] = "price"
         elif key == "id":
-            renamed[col] = "id"
+            renamed[col] = "cek_line_id" if chek_fayli else "id"
     return df.rename(columns=renamed)
 
 
@@ -531,16 +533,16 @@ with tab1:
         df_base = get_db(curr, cat)
         if df_base is not None:
             df_c = pd.read_excel(cek)
-            df_c = standardize_columns(df_c)
-            df_base = standardize_columns(df_base)
+            df_c = standardize_columns(df_c, chek_fayli=True)
+            df_base = standardize_columns(df_base, chek_fayli=False)
 
             required_cek = {"ad", "miqdar"}
             required_base = {"ad", "id"}
             if not required_cek.issubset(set(df_c.columns)):
-                st.error("Çek faylında `Ad` və `Miqdar` sütunları tapılmadı.")
+                st.markdown("**Problem:** Çek faylında `Ad` və `Miqdar` sütunları tapılmadı.")
                 st.stop()
             if not required_base.issubset(set(df_base.columns)):
-                st.error("Baza faylında `Ad` və `id` sütunları tapılmadı.")
+                st.markdown("**Problem:** Baza faylında `Ad` və `id` sütunları tapılmadı.")
                 st.stop()
 
             # choices strip olunur; df_base["ad"] də eyni olmalıdır — əks halda id tapılmır
@@ -687,8 +689,8 @@ with tab1:
                     st.dataframe(pd.DataFrame(skipped_rows), use_container_width=True)
 
             if not final_list:
-                st.warning(
-                    "Uyğun məhsul tapılmadı. Ad yazılışları fərqli ola bilər və ya baza faylı uyğun deyil."
+                st.markdown(
+                    "**Diqqət:** Uyğun məhsul tapılmadı. Ad yazılışları fərqli ola bilər və ya baza faylı uyğun deyil."
                 )
                 st.info(
                     f"Baza məhsulu: {len(df_base)} | Uğursuz match cəhdi: {errors}"
@@ -754,7 +756,7 @@ with tab1:
             res_df["COST"] = (res_df["LINE_TOTAL"] / res_df["QUANTITY"]).round(4)
             res_df = res_df[["ID", "QUANTITY", "COST"]]
 
-            st.success(f"{len(res_df)} məhsul hazırlandı.")
+            st.markdown(f"**Hazırdır:** {len(res_df)} məhsul hazırlandı.")
             if errors:
                 st.info(
                     f"{errors} sətir avtomatik tutulmadı — **Tapılmayanlar** bölməsində əl ilə işləyin."
@@ -799,8 +801,10 @@ with tab1:
                 "unmatched_file_name": um_name,
                 "preview_df": res_df,
             }
-            st.success(
-                f"Clopos import: `{export_name}`"
+            st.markdown(
+                "**Clopos import:** `"
+                + export_name
+                + "`"
                 + (
                     f" — əlavə olaraq **Tapılmayanlar** üçün ayrı Excel ({len(um_df)} sətir) endir."
                     if not um_df.empty
@@ -814,8 +818,8 @@ with tab1:
                 key="download_current",
             )
         else:
-            st.error(
-                "Uyğun ana baza tapılmadı. Repo daxilində fayl adı `ana_<restoran>_<horeca/dk>` formatında olmalıdır."
+            st.markdown(
+                "**Problem:** Uyğun ana baza tapılmadı. Repo daxilində fayl adı `ana_<restoran>_<horeca/dk>` formatında olmalıdır."
             )
 
     saved_export = st.session_state.get("last_export")
@@ -860,18 +864,18 @@ with tab2:
     f_bot = st.file_uploader("2. Analiz Faylı", type=["xlsx"], key="kb")
     if f_orig and f_bot and st.button("🔍 Yoxla"):
         df_o, df_b = pd.read_excel(f_orig), pd.read_excel(f_bot)
-        df_o = standardize_columns(df_o)
-        df_b = standardize_columns(df_b)
+        df_o = standardize_columns(df_o, chek_fayli=True)
+        df_b = standardize_columns(df_b, chek_fayli=False)
         db = get_db(curr, ctrl_cat)
         if db is not None:
-            db = standardize_columns(db)
+            db = standardize_columns(db, chek_fayli=False)
             db["ad"] = db["ad"].astype(str).str.strip()
             db["id"] = pd.to_numeric(db["id"], errors="coerce")
             db = db.dropna(subset=["id", "ad"])
             db["id"] = db["id"].astype(int)
             db = db.drop_duplicates(subset=["ad"], keep="first")
             if "id" not in df_b.columns:
-                st.error("Analiz faylında `ID` / `id` sütunu tapılmadı.")
+                st.markdown("**Problem:** Analiz faylında `ID` / `id` sütunu tapılmadı.")
                 st.stop()
             bot_ids = set(df_b["id"].astype(int).tolist())
             missing = []
@@ -896,4 +900,4 @@ with tab2:
                     missing.append(f"{name} (Bazada yoxdur)")
             st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
         else:
-            st.error("Uyğun ana baza tapılmadı.")
+            st.markdown("**Problem:** Uyğun ana baza tapılmadı.")

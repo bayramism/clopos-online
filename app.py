@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import unicodedata
 from datetime import datetime
 
 import pandas as pd
@@ -18,10 +19,14 @@ if "last_export" not in st.session_state:
     st.session_state.last_export = None
 
 
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", str(s)).replace("\u00a0", " ")
+
+
 def normalize_text(text):
     if not text:
         return ""
-    text = str(text).lower().strip()
+    text = _nfc(text).lower().strip()
     text = re.sub(r"\(\s*(?:ed|kg|kq|lt|qr|gr|ml|l)\s*\)", "", text)
     text = re.sub(r"\d+\s*%", "", text)
     text = re.sub(r"\d+[\.,]\d+", "", text)
@@ -49,7 +54,7 @@ def normalize_text_loose(text):
     """Rəqəmləri silmir — SKU/kod tipli adlar üçün; çek ilə baza fərqli olanda əsas xilaskar."""
     if not text:
         return ""
-    text = str(text).lower().strip()
+    text = _nfc(text).lower().strip()
     text = re.sub(r"\(\s*(?:ed|kg|kq|lt|qr|gr|ml|l)\s*\)", "", text)
     text = re.sub(r"\d+\s*%", "", text)
     text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
@@ -64,6 +69,21 @@ def normalize_text_loose(text):
         .replace("i̇", "i")
     )
     return " ".join(text.split())
+
+
+def _all_rule_key_tokens_in_receipt(ks: str, n_strict: str) -> bool:
+    """Çoxsözlü qayda açarı üçün: hər bir uzun kəlmə çekdə ayrıca token kimi olmalıdır.
+    Əks halda token_set_ratio məs. yalnız «ananas» ilə «sandora ananas»ı səhv birləşdirir."""
+    if not ks or not n_strict:
+        return False
+    receipt_tokens = set(n_strict.split())
+    key_words = [w for w in ks.split() if len(w) > 2]
+    if not key_words:
+        return True
+    for w in key_words:
+        if w not in receipt_tokens:
+            return False
+    return True
 
 
 def apply_special_logic(name, qty, restaurant: str):
@@ -89,8 +109,12 @@ def apply_special_logic(name, qty, restaurant: str):
         ks = normalize_text(str(key))
         if len(ks) < 3:
             continue
-        if fuzz.token_set_ratio(ks, n_strict) >= 86:
-            return val[0], qty * val[1], val[1]
+        if fuzz.token_set_ratio(ks, n_strict) < 88:
+            continue
+        # 2+ kəlməli açar: bütün kəlmələr çekdə token kimi olmalı (yanlış Juice tutulmasının qarşısı)
+        if len(ks.split()) >= 2 and not _all_rule_key_tokens_in_receipt(ks, n_strict):
+            continue
+        return val[0], qty * val[1], val[1]
 
     return name, qty, 1
 
@@ -128,10 +152,14 @@ def _match_with_processor(q_raw, choices, threshold, proc_fn, skip_word_gate=Fal
         if proc_fn(choice) == q_norm:
             return str(choice), 100.0
 
+    # 3+ kəlmə: WRatio tam ifadəni (məs. «sensoy sweet chili») token_set-dən yaxşı tuta bilər
+    n_words = len(q_norm.split())
+    primary_scorer = fuzz.WRatio if n_words >= 3 else fuzz.token_set_ratio
+
     best = process.extractOne(
         q,
         choices,
-        scorer=fuzz.token_set_ratio,
+        scorer=primary_scorer,
         processor=proc_fn,
     )
     if not best:
@@ -141,9 +169,10 @@ def _match_with_processor(q_raw, choices, threshold, proc_fn, skip_word_gate=Fal
     score = float(best[1])
 
     if score < threshold:
-        best2 = process.extractOne(
-            q, choices, scorer=fuzz.WRatio, processor=proc_fn
+        alt_scorer = (
+            fuzz.token_set_ratio if primary_scorer == fuzz.WRatio else fuzz.WRatio
         )
+        best2 = process.extractOne(q, choices, scorer=alt_scorer, processor=proc_fn)
         if best2 and float(best2[1]) >= threshold:
             best_match = str(best2[0])
             score = float(best2[1])
@@ -167,8 +196,11 @@ def get_best_match(query_name, choices, threshold=68):
     r = _match_with_processor(query_name, choices, loose_thr, _fuzz_loose)
     if r[0]:
         return r
-    # Heç biri keçmirsə: ən yaxın variantı yalnız xalla qəbul et (səhv uyğun riski var, amma boş qalmır)
-    last_thr = max(32, int(threshold) - 26)
+    # Çox aşağı hədd: qısa/tək söz sətirlərində yanlış baza riski böyükdür — son çarəni məhdudlaşdırırıq
+    qn = _fuzz_proc(query_name)
+    if len(qn) < 5 or len(qn.split()) < 2:
+        return None, 0
+    last_thr = max(40, int(threshold) - 22)
     return _match_with_processor(
         query_name, choices, last_thr, _fuzz_loose, skip_word_gate=True
     )

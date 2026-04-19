@@ -34,6 +34,16 @@ def _strip_unicode_marks(s: str) -> str:
     )
 
 
+def _clean_ad_choices(df_base) -> list:
+    """Boş / nan sətirlər rapidfuzz-u pozur; bazadan yalnız etibarlı Ad siyahısı."""
+    out = []
+    for x in df_base["ad"].tolist():
+        s = str(x).strip()
+        if s and s.lower() not in ("nan", "none"):
+            out.append(s)
+    return out
+
+
 def normalize_text(text):
     if not text:
         return ""
@@ -611,6 +621,12 @@ def _resolve_id_for_product(df_base, name_query):
     if m is not None:
         return m, ad
 
+    q_nl = normalize_text_loose(raw)
+    loose_match = ads.map(lambda x: normalize_text_loose(str(x))) == q_nl
+    m, ad = _pick(loose_match)
+    if m is not None:
+        return m, ad
+
     qn = normalize_text(raw)
     norm_match = ads.map(lambda x: normalize_text(str(x))) == qn
     m, ad = _pick(norm_match)
@@ -728,7 +744,7 @@ with tab1:
 
             final_list = []
             errors = 0
-            choices = df_base["ad"].tolist()
+            choices = _clean_ad_choices(df_base)
             fail_debug = []
             tapilmayan_rows = []
             skipped_rows = []
@@ -1059,7 +1075,7 @@ with tab2:
                 p_name, _, _ = apply_special_logic(name, 1, curr)
                 m_name, _ = get_best_match(
                     p_name,
-                    db["ad"].astype(str).str.strip().tolist(),
+                    _clean_ad_choices(db),
                     threshold=74,
                     safe_mode=True,
                 )

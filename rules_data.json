@@ -21,7 +21,7 @@
     "BIBLIOTEKA": {
       "avokado": ["Avocado new", 1],
       "mango": ["Mango new", 1],
-      "qatiq": ["Qatiq 450gr", 0.45],
+      "qatiq": ["Qatiq 450gr", 1],
       "Dondurulmush shabalid (kg)": ["Dondurulmush shabalid (kg)", 0.5],
       "Qaymaq Petmol 33%": ["Qaymaq Petmol 33% (kg)", 0.5],
       "Narsarab (345gr)": ["Narsherab (kg)", 0.345],
@@ -77,7 +77,10 @@
       "Bonduriel Qirmizi lobya 425qr": ["Bonduriel Qirmizi lobya 425qr", 0.425],
       "Pinar Labne 750gr (ed)": ["Pinar Labne 750gr (ed)", 0.75],
       "Barilla Linguine": ["Barilla Linguine", 0.45],
-      "Sultan duyu 1.0 kq": ["Uzun duyu (kg)", 1]
+      "Sultan duyu 1.0 kq": ["Uzun duyu (kg)", 1],
+      "Sensoy Sweet Chili Original 320gr (ed)": ["Sensoy Sweet Chili Original 320gr (ed)", 0.32],
+      "Barilla Penne Rigate": ["Barilla Penne Rigate", 0.45],
+      "Kent Vanil 200g (ed)": ["Kent Vanil 200g (ed)", 0.2]
     }
   }
 }

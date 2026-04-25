@@ -570,7 +570,63 @@ def get_db(res_name, category):
     return out
 
 
-def build_export_file_name(restaurant, category):
+def _clean_receipt_no(v: str) -> str:
+    s = _nfc(str(v)).strip()
+    s = re.sub(r"[^\w\-]+", " ", s, flags=re.UNICODE)
+    s = " ".join(s.split())
+    return s[:40]
+
+
+def _extract_export_receipt_no(df_c, uploaded_name: str = "") -> str:
+    if isinstance(df_c, pd.DataFrame) and not df_c.empty:
+        cols = [str(c) for c in df_c.columns]
+        priority = [
+            "cek_no",
+            "check_no",
+            "chek_no",
+            "sened_no",
+            "nomre",
+            "id",
+            "cek_line_id",
+        ]
+        ordered = [c for c in priority if c in cols]
+        ordered += [
+            c
+            for c in cols
+            if c not in ordered
+            and (
+                re.search(r"(cek|check|chek).*(no|nom|nmr)", c, flags=re.IGNORECASE)
+                or re.search(r"(no|nom|nmr).*(cek|check|chek)", c, flags=re.IGNORECASE)
+                or re.search(r"nomre|sened", c, flags=re.IGNORECASE)
+            )
+        ]
+        for c in ordered:
+            s = (
+                df_c[c]
+                .dropna()
+                .astype(str)
+                .map(lambda x: _nfc(x).strip())
+            )
+            s = s[~s.str.lower().isin(["", "nan", "none"])]
+            if s.empty:
+                continue
+            counts = s.value_counts(dropna=True)
+            top = str(counts.index[0]).strip()
+            if len(counts) == 1 or int(counts.iloc[0]) >= max(2, int(len(s) * 0.6)):
+                cleaned = _clean_receipt_no(top)
+                if cleaned:
+                    return cleaned
+    if uploaded_name:
+        m = re.search(r"(\d{4,})", _nfc(uploaded_name))
+        if m:
+            return m.group(1)
+    return datetime.now().strftime("%Y%m%d_%H%M")
+
+
+def build_export_file_name(restaurant, category, receipt_no=None):
+    rec = _clean_receipt_no(receipt_no or "")
+    if rec:
+        return f"clopos import {rec}.xlsx"
     category_tag = "horeca" if category == "Horeca" else "dk"
     restaurant_tag = normalize_restaurant_name(restaurant).replace(" ", "_")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -994,7 +1050,8 @@ with tab1:
                     key="download_um_only_ok",
                 )
 
-            export_name = build_export_file_name(curr, cat)
+            receipt_no = _extract_export_receipt_no(df_c, getattr(cek, "name", ""))
+            export_name = build_export_file_name(curr, cat, receipt_no=receipt_no)
             export_bytes = to_bold_excel_bytes(res_df)
             um_bytes = (
                 to_tapilmayan_only_bytes(um_df) if not um_df.empty else None

@@ -746,25 +746,468 @@ def _first_id_for_name(df_base, m_name):
     return mid
 
 
+def _render_restoran_online_panel() -> None:
+    """Analiz və Kontrol — yalnız Restoran şöbəsi aktiv olanda göstərilir."""
+    curr = st.session_state.selected_res
+    st.markdown(
+        f"<h3 style='text-align: center;'>{curr} | Online Panel</h3>",
+        unsafe_allow_html=True,
+    )
+    tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
+    
+    with tab1:
+        st.caption(
+            "Mexanizm: çekdəki **Ad** ilə ana bazada **eyni məhsul adı** tapılır → export **ID** "
+            "yalnız bazadandır. **QUANTITY** = çek miqdarı (xüsusi qayda varsa çevrilmiş miqdar). "
+            "**COST** = (çekdəki vahid qiymət ÷ Miqdar) ÷ **qayda faktoru** (əgər 1-dirsə yalnız birinci bölmə): "
+            "məs. 1 paket 5 kq = 7 ₼ → çek vahidi 7 ₼, faktor 5 → **1 kq üçün 1,4 ₼**; QUANTITY 5 kq olunca sətir cəmi 7 ₼. "
+            "**Təhlükəsiz rejim**: yalnız aydın uyğunluq qəbul edilir; qalanlar **Tapılmayanlar** "
+            "vərəqində əl ilə doldurmaq üçündür. **Dark Kitchen** üçün ana baza həm `ana_<rest>_dk`, "
+            "həm `ana_<rest>_horeca` faylından oxunur və birləşdirilir; **Horeca** üçün yalnız `_horeca`."
+        )
+        col_a, col_b, col_c = st.columns([1, 1, 1])
+        cat = col_a.selectbox("Sahə:", ["Horeca", "Dark Kitchen"])
+        aggressive_match = col_a.checkbox(
+            "Agressiv uyğunluq (daha çox avtomatik sətir, daha çox səhv riski)",
+            value=False,
+            help="Söndürülmüşdə: yüksək hədd, ikinci yerə yaxın nəticələr rədd, son çarə yoxdur.",
+        )
+        match_thr = col_c.slider(
+            "Uyğunluq həddi (%) — təhlükəsiz rejimdə təklif: 72–80",
+            min_value=60,
+            max_value=95,
+            value=74,
+            help="Aşağı = daha çox sətir; təhlükəsiz rejimdə şübhəli yaxınlıqlar yenə rədd edilə bilər.",
+        )
+        cek = col_b.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
+    
+        if cek and st.button("⚡ Başlat"):
+            df_base = get_db(curr, cat)
+            if df_base is not None:
+                df_c = pd.read_excel(cek)
+                df_c = standardize_columns(df_c, chek_fayli=True)
+                df_base = standardize_columns(df_base, chek_fayli=False)
+    
+                required_cek = {"ad", "miqdar"}
+                required_base = {"ad", "id"}
+                if not required_cek.issubset(set(df_c.columns)):
+                    st.markdown("**Problem:** Çek faylında `Ad` və `Miqdar` sütunları tapılmadı.")
+                    st.stop()
+                if not required_base.issubset(set(df_base.columns)):
+                    st.markdown("**Problem:** Baza faylında `Ad` və `id` sütunları tapılmadı.")
+                    st.stop()
+    
+                # choices strip olunur; df_base["ad"] də eyni olmalıdır — əks halda id tapılmır
+                df_c["ad"] = df_c["ad"].astype(str).str.strip()
+                for _col in ("miqdar", "price"):
+                    if _col in df_c.columns:
+                        df_c[_col] = df_c[_col].map(parse_az_number)
+                df_base["ad"] = df_base["ad"].astype(str).str.strip()
+                df_base["id"] = pd.to_numeric(df_base["id"], errors="coerce")
+                df_base = df_base.dropna(subset=["id", "ad"])
+                df_base["id"] = df_base["id"].astype(int)
+                df_base = df_base.drop_duplicates(subset=["ad"], keep="first")
+    
+                final_list = []
+                errors = 0
+                choices = _clean_ad_choices(df_base)
+                fail_debug = []
+                tapilmayan_rows = []
+                skipped_rows = []
+                safe_mode = not aggressive_match
+                for row_idx, (_, row) in enumerate(df_c.iterrows(), start=1):
+                    o_name = ""
+                    p_name = ""
+                    try:
+                        o_name = str(row.get("ad", "")).strip()
+                        if not o_name or o_name.lower() in ("nan", "none"):
+                            skipped_rows.append(
+                                {
+                                    "Sətir": row_idx,
+                                    "Çekdəki_ad": str(row.get("ad", ""))[:240],
+                                    "Səbəb": "Boş / etibarsız ad",
+                                }
+                            )
+                            continue
+                        o_qty = parse_az_number(row.get("miqdar", 0))
+                        unit_price = parse_az_number(row.get("price", 0))
+                        if o_qty == 0:
+                            skipped_rows.append(
+                                {
+                                    "Sətir": row_idx,
+                                    "Çekdəki_ad": o_name,
+                                    "Səbəb": "Miqdar 0",
+                                }
+                            )
+                            continue
+    
+                        p_name, p_qty, fct = apply_special_logic(o_name, o_qty, curr)
+                        # Çek miqdarına görə bir fiziki vahidin (paket, ed) qiyməti; qayda ilə miqdar fct vurulanda
+                        # Clopos COST = baza vahidinin (məs. 1 kq) qiyməti → paket qiyməti / fct (7/5=1.4).
+                        price_per_cheque_unit = (unit_price / o_qty) if o_qty != 0 else 0.0
+                        cost = (
+                            (price_per_cheque_unit / fct)
+                            if fct not in (None, 0)
+                            else price_per_cheque_unit
+                        )
+                        m_name, _score = get_best_match(
+                            p_name,
+                            choices,
+                            threshold=match_thr,
+                            safe_mode=safe_mode,
+                        )
+                        mid, _canon = (None, None)
+                        if m_name:
+                            mid, _canon = _resolve_id_for_product(df_base, m_name)
+                        if mid is None:
+                            mid, _canon = _resolve_id_for_product(df_base, p_name)
+                        if mid is not None:
+                            final_list.append(
+                                {
+                                    "ID": mid,
+                                    "QUANTITY": p_qty,
+                                    "COST": round(cost, 4),
+                                    "LINE_TOTAL": round(p_qty * cost, 4),
+                                }
+                            )
+                        else:
+                            errors += 1
+                            hits = explain_match(p_name, choices, limit=5)
+                            hits_l = explain_match(
+                                p_name, choices, limit=3, processor=_fuzz_loose
+                            )
+                            row_dbg = {
+                                "Çekdə ad": o_name,
+                                "Miqdar": o_qty,
+                                "Bir_vahid_COST": round(cost, 4),
+                                "Qaydadan sonra": p_name,
+                                "Ən yaxın (token_set)": hits[0][0] if hits else "",
+                                "Xal": round(float(hits[0][1]), 1) if hits else "",
+                                "2-ci": hits[1][0] if len(hits) > 1 else "",
+                                "2 xal": round(float(hits[1][1]), 1) if len(hits) > 1 else "",
+                                "Loose 1": hits_l[0][0] if hits_l else "",
+                                "Loose xal": round(float(hits_l[0][1]), 1) if hits_l else "",
+                            }
+                            fail_debug.append(row_dbg)
+                            tapilmayan_rows.append(
+                                {
+                                    "Sətir": row_idx,
+                                    "Çekdəki_ad": o_name,
+                                    "Qaydadan_sonra": p_name,
+                                    "Miqdar": o_qty,
+                                    "Bir_vahid_COST": round(cost, 4),
+                                    "ID_əl_ile": "",
+                                    "Baza_Adı_əl_ile": "",
+                                }
+                            )
+                    except (ValueError, TypeError, KeyError) as ex:
+                        errors += 1
+                        eq_x = parse_az_number(row.get("miqdar", 0))
+                        up_x = parse_az_number(row.get("price", 0))
+                        cst_x = (up_x / eq_x) if eq_x else 0.0
+                        fail_debug.append(
+                            {
+                                "Çekdə ad": o_name,
+                                "Miqdar": eq_x,
+                                "Bir_vahid_COST": round(cst_x, 4) if eq_x else "",
+                                "Qaydadan sonra": p_name,
+                                "Ən yaxın (token_set)": f"(xəta) {type(ex).__name__}",
+                                "Xal": "",
+                                "2-ci": str(ex)[:120],
+                                "2 xal": "",
+                            }
+                        )
+                        tapilmayan_rows.append(
+                            {
+                                "Sətir": row_idx,
+                                "Çekdəki_ad": o_name
+                                or str(row.get("ad", "")).strip()
+                                or "(xəta)",
+                                "Qaydadan_sonra": p_name,
+                                "Miqdar": eq_x if eq_x else "",
+                                "Bir_vahid_COST": round(cst_x, 4) if eq_x else "",
+                                "ID_əl_ile": "",
+                                "Baza_Adı_əl_ile": "",
+                            }
+                        )
+                        continue
+    
+                n_cek = len(df_c)
+                n_tutulan = len(final_list)
+                n_tapilmayan = len(tapilmayan_rows)
+                n_kecilen = len(skipped_rows)
+                st.info(
+                    f"**Çek sətri (cəmi):** {n_cek} | **Avtomatik tutulan:** {n_tutulan} | "
+                    f"**Tapılmayan:** {n_tapilmayan} | **Keçilən (boş ad / miqdar 0):** {n_kecilen}  \n"
+                    f"*(Yoxlama: {n_tutulan} + {n_tapilmayan} + {n_kecilen} = {n_tutulan + n_tapilmayan + n_kecilen} — çeklə uyğun gəlməlidir.)*"
+                )
+                if skipped_rows:
+                    with st.expander("Keçilən sətirlər (boş ad və ya miqdar 0)", expanded=False):
+                        st.dataframe(pd.DataFrame(skipped_rows), use_container_width=True)
+    
+                if not final_list:
+                    st.markdown(
+                        "**Diqqət:** Uyğun məhsul tapılmadı. Ad yazılışları fərqli ola bilər və ya baza faylı uyğun deyil."
+                    )
+                    st.info(
+                        f"Baza məhsulu: {len(df_base)} | Uğursuz match cəhdi: {errors}"
+                    )
+                    if tapilmayan_rows:
+                        st.markdown("### Tapılmayanlar")
+                        st.caption(
+                            "Bu sətirləri əl ilə bazada tapıb `rules.py` və ya ana bazaya əlavə edin; "
+                            "boş sütunları Exceldə doldura bilərsiniz."
+                        )
+                        um_only = pd.DataFrame(tapilmayan_rows)
+                        st.dataframe(um_only, use_container_width=True)
+                        st.download_button(
+                            "📥 Tapılmayanlar (Excel)",
+                            to_tapilmayan_only_bytes(um_only),
+                            f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                            key="download_um_only_fail",
+                        )
+                    sample = df_c[["ad", "miqdar"]].dropna(subset=["ad"]).head(10).rename(
+                        columns={"ad": "Çekdə ad", "miqdar": "Miqdar"}
+                    )
+                    if not sample.empty:
+                        st.markdown("İlk 10 çek adı (baza ilə vizual müqayisə üçün):")
+                        st.dataframe(sample, use_container_width=True)
+                    if fail_debug:
+                        dbg_df = pd.DataFrame(fail_debug)
+                        with st.expander(
+                            "Diaqnostika: hər sətir üçün bazadan ən yaxın 2 variant (xal aşağıdırsa həddi sal)",
+                            expanded=True,
+                        ):
+                            st.dataframe(dbg_df, use_container_width=True)
+                        dbg_bytes = to_bold_excel_bytes(
+                            dbg_df.rename(
+                                columns={
+                                    "Çekdə ad": "cek_ad",
+                                    "Qaydadan sonra": "qayda_sonra",
+                                    "Ən yaxın (token_set)": "en_yaxin_1",
+                                    "Xal": "xal_1",
+                                    "2-ci": "en_yaxin_2",
+                                    "2 xal": "xal_2",
+                                    "Loose 1": "loose_1",
+                                    "Loose xal": "loose_xal",
+                                }
+                            )
+                        )
+                        st.download_button(
+                            "📥 Diaqnostika cədvəlini Excel kimi endir",
+                            dbg_bytes,
+                            f"clopos_diag_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                            key="download_diag",
+                        )
+                    st.caption(
+                        "Əsas export yalnız ən azı bir sətir uğurla uyğunlaşanda çıxır. "
+                        "Yuxarıdakı sürgü ilə həddi azaldıb ⚡ Başlat-a yenidən bas."
+                    )
+                    st.stop()
+    
+                res_df = (
+                    pd.DataFrame(final_list)
+                    .groupby("ID", as_index=False)
+                    .agg({"QUANTITY": "sum", "LINE_TOTAL": "sum"})
+                )
+                res_df["COST"] = (res_df["LINE_TOTAL"] / res_df["QUANTITY"]).round(4)
+                res_df = res_df[["ID", "QUANTITY", "COST"]]
+    
+                st.markdown(f"**Hazırdır:** {len(res_df)} məhsul hazırlandı.")
+                if errors:
+                    st.info(
+                        f"{errors} sətir avtomatik tutulmadı — **Tapılmayanlar** bölməsində əl ilə işləyin."
+                    )
+    
+                st.dataframe(res_df, use_container_width=True)
+    
+                um_df = pd.DataFrame(tapilmayan_rows) if tapilmayan_rows else pd.DataFrame()
+                if not um_df.empty:
+                    st.markdown("### Tapılmayanlar")
+                    st.caption(
+                        "Bu sətirlər təhlükəsiz rejimdə baza ilə avtomatik birləşdirilmədi (və ya uyğunluq "
+                        "şübhəli sayıldı). **ID_əl_ile** / **Baza_Adı_əl_ile** sütunlarını Exceldə doldurub "
+                        "sonra `rules.py`-ə qayda əlavə edin və ya bazanı yeniləyin."
+                    )
+                    st.dataframe(um_df, use_container_width=True)
+                    st.download_button(
+                        "📥 Yalnız Tapılmayanlar (Excel)",
+                        to_tapilmayan_only_bytes(um_df),
+                        f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        key="download_um_only_ok",
+                    )
+    
+                receipt_no = _extract_export_receipt_no(df_c, getattr(cek, "name", ""))
+                export_name = build_export_file_name(curr, cat, receipt_no=receipt_no)
+                export_bytes = to_bold_excel_bytes(res_df)
+                um_bytes = (
+                    to_tapilmayan_only_bytes(um_df) if not um_df.empty else None
+                )
+                um_name = (
+                    f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+                    if um_bytes
+                    else None
+                )
+                st.session_state.last_export = {
+                    "restaurant": curr,
+                    "category": cat,
+                    "rows": len(res_df),
+                    "unmatched": len(um_df),
+                    "file_name": export_name,
+                    "file_bytes": export_bytes,
+                    "unmatched_bytes": um_bytes,
+                    "unmatched_file_name": um_name,
+                    "preview_df": res_df,
+                }
+                st.markdown(
+                    "**Clopos import:** `"
+                    + export_name
+                    + "`"
+                    + (
+                        f" — əlavə olaraq **Tapılmayanlar** üçün ayrı Excel ({len(um_df)} sətir) endir."
+                        if not um_df.empty
+                        else "."
+                    )
+                )
+                st.download_button(
+                    "📥 Clopos import (yalnız ID, QUANTITY, COST)",
+                    export_bytes,
+                    export_name,
+                    key="download_current",
+                )
+            else:
+                dk_hint = (
+                    " **Dark Kitchen** üçün ən azı biri olmalıdır: `ana_<restoran>_dk` və/və ya "
+                    "`ana_<restoran>_horeca`."
+                    if cat == "Dark Kitchen"
+                    else " **Horeca** üçün `ana_<restoran>_horeca` faylı lazımdır."
+                )
+                st.markdown(
+                    "**Problem:** Uyğun ana baza tapılmadı. Repo kökündə fayl adı `ana_<restoran>_horeca` "
+                    "və ya `ana_<restoran>_dk` formatında olmalıdır."
+                    + dk_hint
+                )
+    
+        saved_export = st.session_state.get("last_export")
+        if saved_export:
+            st.markdown("---")
+            st.markdown("### Son hazırlanmış fayl")
+            st.write(
+                f"Restoran: **{saved_export['restaurant']}** | "
+                f"Sahə: **{saved_export['category']}** | "
+                f"Sətir sayı: **{saved_export['rows']}**"
+            )
+            if saved_export.get("unmatched"):
+                st.caption(
+                    f"Son analizdə **tapılmayan** sətir: **{saved_export['unmatched']}** — Clopos faylına "
+                    "daxil edilmir; ayrıca Excel aşağıdan endir."
+                )
+            st.write(f"Clopos faylı: `{saved_export['file_name']}`")
+            st.dataframe(saved_export["preview_df"], use_container_width=True)
+            st.download_button(
+                "📥 Clopos faylını yenidən endir",
+                saved_export["file_bytes"],
+                saved_export["file_name"],
+                key="download_saved",
+            )
+            ub = saved_export.get("unmatched_bytes")
+            ufn = saved_export.get("unmatched_file_name")
+            if ub and ufn:
+                st.download_button(
+                    "📥 Tapılmayanlar faylını yenidən endir",
+                    ub,
+                    ufn,
+                    key="download_saved_um",
+                )
+    
+    with tab2:
+        ctrl_cat = st.selectbox(
+            "Kontrol üçün baza sahəsi:",
+            ["Horeca", "Dark Kitchen"],
+            key="tab2_cat",
+        )
+        f_orig = st.file_uploader("1. Orijinal Çek", type=["xlsx"], key="ko")
+        f_bot = st.file_uploader("2. Analiz Faylı", type=["xlsx"], key="kb")
+        if f_orig and f_bot and st.button("🔍 Yoxla"):
+            df_o, df_b = pd.read_excel(f_orig), pd.read_excel(f_bot)
+            df_o = standardize_columns(df_o, chek_fayli=True)
+            df_b = standardize_columns(df_b, chek_fayli=False)
+            db = get_db(curr, ctrl_cat)
+            if db is not None:
+                db = standardize_columns(db, chek_fayli=False)
+                db["ad"] = db["ad"].astype(str).str.strip()
+                db["id"] = pd.to_numeric(db["id"], errors="coerce")
+                db = db.dropna(subset=["id", "ad"])
+                db["id"] = db["id"].astype(int)
+                db = db.drop_duplicates(subset=["ad"], keep="first")
+                if "id" not in df_b.columns:
+                    st.markdown("**Problem:** Analiz faylında `ID` / `id` sütunu tapılmadı.")
+                    st.stop()
+                bot_ids = set(df_b["id"].astype(int).tolist())
+                missing = []
+                for _, row in df_o.iterrows():
+                    name = str(row.get("ad", ""))
+                    p_name, _, _ = apply_special_logic(name, 1, curr)
+                    m_name, _ = get_best_match(
+                        p_name,
+                        _clean_ad_choices(db),
+                        threshold=74,
+                        safe_mode=True,
+                    )
+                    tid, _ = (None, None)
+                    if m_name:
+                        tid, _ = _resolve_id_for_product(db, m_name)
+                    if tid is None:
+                        tid, _ = _resolve_id_for_product(db, p_name)
+                    if tid is not None:
+                        if tid not in bot_ids:
+                            missing.append(name)
+                    else:
+                        missing.append(f"{name} (Bazada yoxdur)")
+                st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
+            else:
+                st.markdown("**Problem:** Uyğun ana baza tapılmadı.")
+
 # --- SİDEBAR ---
+if "panel_branch" not in st.session_state:
+    st.session_state.panel_branch = "restoran"
+
 res_options = discover_restaurants()
 if st.session_state.selected_res not in res_options:
     st.session_state.selected_res = res_options[0]
 
-sb_rest, sb_inv = st.sidebar.tabs(["🏢 Restoran", "📦 İnventarizasiya"])
-with sb_rest:
-    st.markdown("##### Restoran seçimi")
+st.sidebar.markdown("#### Şöbə")
+st.sidebar.radio(
+    "Şöbə",
+    ["restoran", "inventar"],
+    horizontal=True,
+    key="panel_branch",
+    label_visibility="collapsed",
+    format_func=lambda x: "🏢 Restoran" if x == "restoran" else "📦 İnventarizasiya",
+)
+
+if st.session_state.panel_branch == "restoran":
+    st.sidebar.markdown("##### Restoran seçimi")
     for res_opt in res_options:
         label = f"{res_opt} ✅" if st.session_state.selected_res == res_opt else res_opt
-        if st.button(label, key=f"btn_{res_opt}", use_container_width=True):
+        if st.sidebar.button(label, key=f"btn_{res_opt}", use_container_width=True):
             st.session_state.selected_res = res_opt
             st.rerun()
-    st.info("Ana baza faylları GitHub mənbəsindən avtomatik oxunur.")
+    st.sidebar.info("Ana baza faylları GitHub mənbəsindən avtomatik oxunur.")
+else:
+    st.sidebar.info(
+        "İnventarizasiya üçün faylları əsas iş sahəsindəki pəncərələrə yükləyin."
+    )
 
-with sb_inv:
-    st.caption(
-        "Clopos həftəlik inventar Excel fayllarını bura yükləyin. Bu mərhələdə yalnız yükləmə; "
-        "emal və Google hesabatına köçürmə sonrakı addımda əlavə olunacaq."
+# --- PANELLƏR ---
+if st.session_state.panel_branch == "inventar":
+    st.markdown(
+        "<h3 style='text-align: center;'>📦 İnventarizasiya</h3>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "Clopos həftəlik inventar **.xlsx** fayllarını dövr üzrə yükləyin. Bu mərhələdə yalnız yükləmə; "
+        "emal sonrakı addımda əlavə olunacaq."
     )
     inv_slots = [
         ("1Week", "inv_week1"),
@@ -773,426 +1216,10 @@ with sb_inv:
         ("4Week", "inv_week4"),
         ("MONTH", "inv_month"),
     ]
-    for inv_label, inv_key in inv_slots:
-        st.file_uploader(inv_label, type=["xlsx"], key=inv_key)
-
-# --- PANELLƏR ---
-curr = st.session_state.selected_res
-st.markdown(
-    f"<h3 style='text-align: center;'>{curr} | Online Panel</h3>",
-    unsafe_allow_html=True,
-)
-tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
-
-with tab1:
-    st.caption(
-        "Mexanizm: çekdəki **Ad** ilə ana bazada **eyni məhsul adı** tapılır → export **ID** "
-        "yalnız bazadandır. **QUANTITY** = çek miqdarı (xüsusi qayda varsa çevrilmiş miqdar). "
-        "**COST** = (çekdəki vahid qiymət ÷ Miqdar) ÷ **qayda faktoru** (əgər 1-dirsə yalnız birinci bölmə): "
-        "məs. 1 paket 5 kq = 7 ₼ → çek vahidi 7 ₼, faktor 5 → **1 kq üçün 1,4 ₼**; QUANTITY 5 kq olunca sətir cəmi 7 ₼. "
-        "**Təhlükəsiz rejim**: yalnız aydın uyğunluq qəbul edilir; qalanlar **Tapılmayanlar** "
-        "vərəqində əl ilə doldurmaq üçündür. **Dark Kitchen** üçün ana baza həm `ana_<rest>_dk`, "
-        "həm `ana_<rest>_horeca` faylından oxunur və birləşdirilir; **Horeca** üçün yalnız `_horeca`."
-    )
-    col_a, col_b, col_c = st.columns([1, 1, 1])
-    cat = col_a.selectbox("Sahə:", ["Horeca", "Dark Kitchen"])
-    aggressive_match = col_a.checkbox(
-        "Agressiv uyğunluq (daha çox avtomatik sətir, daha çox səhv riski)",
-        value=False,
-        help="Söndürülmüşdə: yüksək hədd, ikinci yerə yaxın nəticələr rədd, son çarə yoxdur.",
-    )
-    match_thr = col_c.slider(
-        "Uyğunluq həddi (%) — təhlükəsiz rejimdə təklif: 72–80",
-        min_value=60,
-        max_value=95,
-        value=74,
-        help="Aşağı = daha çox sətir; təhlükəsiz rejimdə şübhəli yaxınlıqlar yenə rədd edilə bilər.",
-    )
-    cek = col_b.file_uploader("📄 Sklad Çekini Yüklə", type=["xlsx"])
-
-    if cek and st.button("⚡ Başlat"):
-        df_base = get_db(curr, cat)
-        if df_base is not None:
-            df_c = pd.read_excel(cek)
-            df_c = standardize_columns(df_c, chek_fayli=True)
-            df_base = standardize_columns(df_base, chek_fayli=False)
-
-            required_cek = {"ad", "miqdar"}
-            required_base = {"ad", "id"}
-            if not required_cek.issubset(set(df_c.columns)):
-                st.markdown("**Problem:** Çek faylında `Ad` və `Miqdar` sütunları tapılmadı.")
-                st.stop()
-            if not required_base.issubset(set(df_base.columns)):
-                st.markdown("**Problem:** Baza faylında `Ad` və `id` sütunları tapılmadı.")
-                st.stop()
-
-            # choices strip olunur; df_base["ad"] də eyni olmalıdır — əks halda id tapılmır
-            df_c["ad"] = df_c["ad"].astype(str).str.strip()
-            for _col in ("miqdar", "price"):
-                if _col in df_c.columns:
-                    df_c[_col] = df_c[_col].map(parse_az_number)
-            df_base["ad"] = df_base["ad"].astype(str).str.strip()
-            df_base["id"] = pd.to_numeric(df_base["id"], errors="coerce")
-            df_base = df_base.dropna(subset=["id", "ad"])
-            df_base["id"] = df_base["id"].astype(int)
-            df_base = df_base.drop_duplicates(subset=["ad"], keep="first")
-
-            final_list = []
-            errors = 0
-            choices = _clean_ad_choices(df_base)
-            fail_debug = []
-            tapilmayan_rows = []
-            skipped_rows = []
-            safe_mode = not aggressive_match
-            for row_idx, (_, row) in enumerate(df_c.iterrows(), start=1):
-                o_name = ""
-                p_name = ""
-                try:
-                    o_name = str(row.get("ad", "")).strip()
-                    if not o_name or o_name.lower() in ("nan", "none"):
-                        skipped_rows.append(
-                            {
-                                "Sətir": row_idx,
-                                "Çekdəki_ad": str(row.get("ad", ""))[:240],
-                                "Səbəb": "Boş / etibarsız ad",
-                            }
-                        )
-                        continue
-                    o_qty = parse_az_number(row.get("miqdar", 0))
-                    unit_price = parse_az_number(row.get("price", 0))
-                    if o_qty == 0:
-                        skipped_rows.append(
-                            {
-                                "Sətir": row_idx,
-                                "Çekdəki_ad": o_name,
-                                "Səbəb": "Miqdar 0",
-                            }
-                        )
-                        continue
-
-                    p_name, p_qty, fct = apply_special_logic(o_name, o_qty, curr)
-                    # Çek miqdarına görə bir fiziki vahidin (paket, ed) qiyməti; qayda ilə miqdar fct vurulanda
-                    # Clopos COST = baza vahidinin (məs. 1 kq) qiyməti → paket qiyməti / fct (7/5=1.4).
-                    price_per_cheque_unit = (unit_price / o_qty) if o_qty != 0 else 0.0
-                    cost = (
-                        (price_per_cheque_unit / fct)
-                        if fct not in (None, 0)
-                        else price_per_cheque_unit
-                    )
-                    m_name, _score = get_best_match(
-                        p_name,
-                        choices,
-                        threshold=match_thr,
-                        safe_mode=safe_mode,
-                    )
-                    mid, _canon = (None, None)
-                    if m_name:
-                        mid, _canon = _resolve_id_for_product(df_base, m_name)
-                    if mid is None:
-                        mid, _canon = _resolve_id_for_product(df_base, p_name)
-                    if mid is not None:
-                        final_list.append(
-                            {
-                                "ID": mid,
-                                "QUANTITY": p_qty,
-                                "COST": round(cost, 4),
-                                "LINE_TOTAL": round(p_qty * cost, 4),
-                            }
-                        )
-                    else:
-                        errors += 1
-                        hits = explain_match(p_name, choices, limit=5)
-                        hits_l = explain_match(
-                            p_name, choices, limit=3, processor=_fuzz_loose
-                        )
-                        row_dbg = {
-                            "Çekdə ad": o_name,
-                            "Miqdar": o_qty,
-                            "Bir_vahid_COST": round(cost, 4),
-                            "Qaydadan sonra": p_name,
-                            "Ən yaxın (token_set)": hits[0][0] if hits else "",
-                            "Xal": round(float(hits[0][1]), 1) if hits else "",
-                            "2-ci": hits[1][0] if len(hits) > 1 else "",
-                            "2 xal": round(float(hits[1][1]), 1) if len(hits) > 1 else "",
-                            "Loose 1": hits_l[0][0] if hits_l else "",
-                            "Loose xal": round(float(hits_l[0][1]), 1) if hits_l else "",
-                        }
-                        fail_debug.append(row_dbg)
-                        tapilmayan_rows.append(
-                            {
-                                "Sətir": row_idx,
-                                "Çekdəki_ad": o_name,
-                                "Qaydadan_sonra": p_name,
-                                "Miqdar": o_qty,
-                                "Bir_vahid_COST": round(cost, 4),
-                                "ID_əl_ile": "",
-                                "Baza_Adı_əl_ile": "",
-                            }
-                        )
-                except (ValueError, TypeError, KeyError) as ex:
-                    errors += 1
-                    eq_x = parse_az_number(row.get("miqdar", 0))
-                    up_x = parse_az_number(row.get("price", 0))
-                    cst_x = (up_x / eq_x) if eq_x else 0.0
-                    fail_debug.append(
-                        {
-                            "Çekdə ad": o_name,
-                            "Miqdar": eq_x,
-                            "Bir_vahid_COST": round(cst_x, 4) if eq_x else "",
-                            "Qaydadan sonra": p_name,
-                            "Ən yaxın (token_set)": f"(xəta) {type(ex).__name__}",
-                            "Xal": "",
-                            "2-ci": str(ex)[:120],
-                            "2 xal": "",
-                        }
-                    )
-                    tapilmayan_rows.append(
-                        {
-                            "Sətir": row_idx,
-                            "Çekdəki_ad": o_name
-                            or str(row.get("ad", "")).strip()
-                            or "(xəta)",
-                            "Qaydadan_sonra": p_name,
-                            "Miqdar": eq_x if eq_x else "",
-                            "Bir_vahid_COST": round(cst_x, 4) if eq_x else "",
-                            "ID_əl_ile": "",
-                            "Baza_Adı_əl_ile": "",
-                        }
-                    )
-                    continue
-
-            n_cek = len(df_c)
-            n_tutulan = len(final_list)
-            n_tapilmayan = len(tapilmayan_rows)
-            n_kecilen = len(skipped_rows)
-            st.info(
-                f"**Çek sətri (cəmi):** {n_cek} | **Avtomatik tutulan:** {n_tutulan} | "
-                f"**Tapılmayan:** {n_tapilmayan} | **Keçilən (boş ad / miqdar 0):** {n_kecilen}  \n"
-                f"*(Yoxlama: {n_tutulan} + {n_tapilmayan} + {n_kecilen} = {n_tutulan + n_tapilmayan + n_kecilen} — çeklə uyğun gəlməlidir.)*"
-            )
-            if skipped_rows:
-                with st.expander("Keçilən sətirlər (boş ad və ya miqdar 0)", expanded=False):
-                    st.dataframe(pd.DataFrame(skipped_rows), use_container_width=True)
-
-            if not final_list:
-                st.markdown(
-                    "**Diqqət:** Uyğun məhsul tapılmadı. Ad yazılışları fərqli ola bilər və ya baza faylı uyğun deyil."
-                )
-                st.info(
-                    f"Baza məhsulu: {len(df_base)} | Uğursuz match cəhdi: {errors}"
-                )
-                if tapilmayan_rows:
-                    st.markdown("### Tapılmayanlar")
-                    st.caption(
-                        "Bu sətirləri əl ilə bazada tapıb `rules.py` və ya ana bazaya əlavə edin; "
-                        "boş sütunları Exceldə doldura bilərsiniz."
-                    )
-                    um_only = pd.DataFrame(tapilmayan_rows)
-                    st.dataframe(um_only, use_container_width=True)
-                    st.download_button(
-                        "📥 Tapılmayanlar (Excel)",
-                        to_tapilmayan_only_bytes(um_only),
-                        f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                        key="download_um_only_fail",
-                    )
-                sample = df_c[["ad", "miqdar"]].dropna(subset=["ad"]).head(10).rename(
-                    columns={"ad": "Çekdə ad", "miqdar": "Miqdar"}
-                )
-                if not sample.empty:
-                    st.markdown("İlk 10 çek adı (baza ilə vizual müqayisə üçün):")
-                    st.dataframe(sample, use_container_width=True)
-                if fail_debug:
-                    dbg_df = pd.DataFrame(fail_debug)
-                    with st.expander(
-                        "Diaqnostika: hər sətir üçün bazadan ən yaxın 2 variant (xal aşağıdırsa həddi sal)",
-                        expanded=True,
-                    ):
-                        st.dataframe(dbg_df, use_container_width=True)
-                    dbg_bytes = to_bold_excel_bytes(
-                        dbg_df.rename(
-                            columns={
-                                "Çekdə ad": "cek_ad",
-                                "Qaydadan sonra": "qayda_sonra",
-                                "Ən yaxın (token_set)": "en_yaxin_1",
-                                "Xal": "xal_1",
-                                "2-ci": "en_yaxin_2",
-                                "2 xal": "xal_2",
-                                "Loose 1": "loose_1",
-                                "Loose xal": "loose_xal",
-                            }
-                        )
-                    )
-                    st.download_button(
-                        "📥 Diaqnostika cədvəlini Excel kimi endir",
-                        dbg_bytes,
-                        f"clopos_diag_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                        key="download_diag",
-                    )
-                st.caption(
-                    "Əsas export yalnız ən azı bir sətir uğurla uyğunlaşanda çıxır. "
-                    "Yuxarıdakı sürgü ilə həddi azaldıb ⚡ Başlat-a yenidən bas."
-                )
-                st.stop()
-
-            res_df = (
-                pd.DataFrame(final_list)
-                .groupby("ID", as_index=False)
-                .agg({"QUANTITY": "sum", "LINE_TOTAL": "sum"})
-            )
-            res_df["COST"] = (res_df["LINE_TOTAL"] / res_df["QUANTITY"]).round(4)
-            res_df = res_df[["ID", "QUANTITY", "COST"]]
-
-            st.markdown(f"**Hazırdır:** {len(res_df)} məhsul hazırlandı.")
-            if errors:
-                st.info(
-                    f"{errors} sətir avtomatik tutulmadı — **Tapılmayanlar** bölməsində əl ilə işləyin."
-                )
-
-            st.dataframe(res_df, use_container_width=True)
-
-            um_df = pd.DataFrame(tapilmayan_rows) if tapilmayan_rows else pd.DataFrame()
-            if not um_df.empty:
-                st.markdown("### Tapılmayanlar")
-                st.caption(
-                    "Bu sətirlər təhlükəsiz rejimdə baza ilə avtomatik birləşdirilmədi (və ya uyğunluq "
-                    "şübhəli sayıldı). **ID_əl_ile** / **Baza_Adı_əl_ile** sütunlarını Exceldə doldurub "
-                    "sonra `rules.py`-ə qayda əlavə edin və ya bazanı yeniləyin."
-                )
-                st.dataframe(um_df, use_container_width=True)
-                st.download_button(
-                    "📥 Yalnız Tapılmayanlar (Excel)",
-                    to_tapilmayan_only_bytes(um_df),
-                    f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                    key="download_um_only_ok",
-                )
-
-            receipt_no = _extract_export_receipt_no(df_c, getattr(cek, "name", ""))
-            export_name = build_export_file_name(curr, cat, receipt_no=receipt_no)
-            export_bytes = to_bold_excel_bytes(res_df)
-            um_bytes = (
-                to_tapilmayan_only_bytes(um_df) if not um_df.empty else None
-            )
-            um_name = (
-                f"tapilmayanlar_{curr}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-                if um_bytes
-                else None
-            )
-            st.session_state.last_export = {
-                "restaurant": curr,
-                "category": cat,
-                "rows": len(res_df),
-                "unmatched": len(um_df),
-                "file_name": export_name,
-                "file_bytes": export_bytes,
-                "unmatched_bytes": um_bytes,
-                "unmatched_file_name": um_name,
-                "preview_df": res_df,
-            }
-            st.markdown(
-                "**Clopos import:** `"
-                + export_name
-                + "`"
-                + (
-                    f" — əlavə olaraq **Tapılmayanlar** üçün ayrı Excel ({len(um_df)} sətir) endir."
-                    if not um_df.empty
-                    else "."
-                )
-            )
-            st.download_button(
-                "📥 Clopos import (yalnız ID, QUANTITY, COST)",
-                export_bytes,
-                export_name,
-                key="download_current",
-            )
-        else:
-            dk_hint = (
-                " **Dark Kitchen** üçün ən azı biri olmalıdır: `ana_<restoran>_dk` və/və ya "
-                "`ana_<restoran>_horeca`."
-                if cat == "Dark Kitchen"
-                else " **Horeca** üçün `ana_<restoran>_horeca` faylı lazımdır."
-            )
-            st.markdown(
-                "**Problem:** Uyğun ana baza tapılmadı. Repo kökündə fayl adı `ana_<restoran>_horeca` "
-                "və ya `ana_<restoran>_dk` formatında olmalıdır."
-                + dk_hint
-            )
-
-    saved_export = st.session_state.get("last_export")
-    if saved_export:
-        st.markdown("---")
-        st.markdown("### Son hazırlanmış fayl")
-        st.write(
-            f"Restoran: **{saved_export['restaurant']}** | "
-            f"Sahə: **{saved_export['category']}** | "
-            f"Sətir sayı: **{saved_export['rows']}**"
-        )
-        if saved_export.get("unmatched"):
-            st.caption(
-                f"Son analizdə **tapılmayan** sətir: **{saved_export['unmatched']}** — Clopos faylına "
-                "daxil edilmir; ayrıca Excel aşağıdan endir."
-            )
-        st.write(f"Clopos faylı: `{saved_export['file_name']}`")
-        st.dataframe(saved_export["preview_df"], use_container_width=True)
-        st.download_button(
-            "📥 Clopos faylını yenidən endir",
-            saved_export["file_bytes"],
-            saved_export["file_name"],
-            key="download_saved",
-        )
-        ub = saved_export.get("unmatched_bytes")
-        ufn = saved_export.get("unmatched_file_name")
-        if ub and ufn:
-            st.download_button(
-                "📥 Tapılmayanlar faylını yenidən endir",
-                ub,
-                ufn,
-                key="download_saved_um",
-            )
-
-with tab2:
-    ctrl_cat = st.selectbox(
-        "Kontrol üçün baza sahəsi:",
-        ["Horeca", "Dark Kitchen"],
-        key="tab2_cat",
-    )
-    f_orig = st.file_uploader("1. Orijinal Çek", type=["xlsx"], key="ko")
-    f_bot = st.file_uploader("2. Analiz Faylı", type=["xlsx"], key="kb")
-    if f_orig and f_bot and st.button("🔍 Yoxla"):
-        df_o, df_b = pd.read_excel(f_orig), pd.read_excel(f_bot)
-        df_o = standardize_columns(df_o, chek_fayli=True)
-        df_b = standardize_columns(df_b, chek_fayli=False)
-        db = get_db(curr, ctrl_cat)
-        if db is not None:
-            db = standardize_columns(db, chek_fayli=False)
-            db["ad"] = db["ad"].astype(str).str.strip()
-            db["id"] = pd.to_numeric(db["id"], errors="coerce")
-            db = db.dropna(subset=["id", "ad"])
-            db["id"] = db["id"].astype(int)
-            db = db.drop_duplicates(subset=["ad"], keep="first")
-            if "id" not in df_b.columns:
-                st.markdown("**Problem:** Analiz faylında `ID` / `id` sütunu tapılmadı.")
-                st.stop()
-            bot_ids = set(df_b["id"].astype(int).tolist())
-            missing = []
-            for _, row in df_o.iterrows():
-                name = str(row.get("ad", ""))
-                p_name, _, _ = apply_special_logic(name, 1, curr)
-                m_name, _ = get_best_match(
-                    p_name,
-                    _clean_ad_choices(db),
-                    threshold=74,
-                    safe_mode=True,
-                )
-                tid, _ = (None, None)
-                if m_name:
-                    tid, _ = _resolve_id_for_product(db, m_name)
-                if tid is None:
-                    tid, _ = _resolve_id_for_product(db, p_name)
-                if tid is not None:
-                    if tid not in bot_ids:
-                        missing.append(name)
-                else:
-                    missing.append(f"{name} (Bazada yoxdur)")
-            st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
-        else:
-            st.markdown("**Problem:** Uyğun ana baza tapılmadı.")
+    inv_cols = st.columns(5)
+    for inv_col, (inv_label, inv_key) in zip(inv_cols, inv_slots):
+        with inv_col:
+            with st.container(border=True):
+                st.file_uploader(inv_label, type=["xlsx"], key=inv_key)
+elif st.session_state.panel_branch == "restoran":
+    _render_restoran_online_panel()

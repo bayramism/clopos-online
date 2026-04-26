@@ -7,8 +7,9 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-# Plan üzrə silinən başlıqlar (Excel B,D,F,K,L,O,P,Q,U)
+# Plan üzrə silinən başlıqlar (Excel A,B,D,F,K,L,O,P,Q,U)
 _DROP_HEADERS = (
+    "İD",
     "Type",
     "Vahid",
     "Son yoxlama",
@@ -23,8 +24,6 @@ _DROP_HEADERS = (
 # Sıralama: bütün silinmələrdən sonra Excel B = ikinci sütun (indeks 1)
 _SORT_COL_ZERO_BASED = 1
 
-# Excel hərfi A, D, K — standart exportda indekslər 0, 3, 10 (başqa silinmələrdən əvvəl)
-_EXCEL_ADK_ZERO_BASED = (0, 3, 10)
 
 
 def _drop_columns_at_excel_positions(

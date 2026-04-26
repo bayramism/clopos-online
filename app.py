@@ -1346,6 +1346,106 @@ def _render_restoran_online_panel() -> None:
             else:
                 st.markdown("**Problem:** Uyğun ana baza tapılmadı.")
 
+
+def _render_site_info_dialog_body() -> None:
+    """Ümumi təlimat — yeni istifadəçi üçün strukturlu məlumat."""
+    st.caption(
+        "Bu pəncərəni istənilən vaxt açmaq üçün səhifənin **ən aşağısında, sağ tərəfdə** "
+        "**ℹ️ Məlumat** düyməsini sıxın."
+    )
+    st.markdown(
+        "Bu səhifə **iki əsas şöbədən** ibarətdir. Sol paneldə **Şöbə** seçiminə görə "
+        "əsas iş sahəsi dəyişir. Aşağıdakı bölmələr hər addımı izah edir."
+    )
+    st.divider()
+
+    st.subheader("1. Şöbələr (sol panel)")
+    st.markdown(
+        """
+- **Restoran** — sklad **çək** faylının Clopos **ana baza** ilə uyğunlaşdırılması (Analiz) və nəticənin yoxlanması (Kontrol).
+- **İnventarizasiya** — Clopos-dan götürülmüş **həftəlik / ay** inventar Excel çıxışlarının eyni qaydalarla emalı (sütun təmizliyi, sıra, filtr).
+
+Sol paneldə **Restoran** aktiv olanda həmin restoranın düyməsini seçin; **İnventarizasiya** aktiv olanda isə faylları əsas sahədəki **1Week … MONTH** pəncərələrinə yükləyin.
+        """
+    )
+
+    st.subheader("2. Restoran şöbəsi — məlumat mənbəyi")
+    st.markdown(
+        """
+- **Ana baza** faylları **GitHub** mənbəsindən avtomatik oxunur (əl ilə yükləmə tələb olunmur).
+- Seçdiyiniz restoran və sahə (**Horeca** / **Dark Kitchen**) bütün Analiz və Kontrol əməliyyatları üçün əsasdır.
+        """
+    )
+
+    st.subheader("3. ANALİZ tabı (Restoran)")
+    st.markdown(
+        """
+**Məqsəd:** Çekdəki məhsul **Ad** sütunu ilə bazadakı **eyni məhsul adı** üz-üzə gətirilir; export faylında **ID** yalnız bazadan götürülür.
+
+| Anlayış | Qısa izah |
+|--------|------------|
+| **QUANTITY** | Çekdəki miqdar (xüsusi qayda varsa çevrilmiş miqdar). |
+| **COST** | Çekdəki vahid qiymət və miqdar əsasında hesab; qayda **faktoru** varsa (məs. 1 paket = 5 kq) vahid qiymət baza vahidinə (məs. 1 kq) çevrilir. |
+| **Təhlükəsiz rejim** | Yalnız kifayət qədər aydın uyğunluq qəbul edilir; qalıqlar **Tapılmayanlar** vərəqində əl ilə tamamlama üçün qalır. |
+| **Dark Kitchen** | Ana baza həm `_dk`, həm `_horeca` faylından oxunub birləşdirilir. |
+| **Horeca** | Yalnız `_horeca` baza faylı istifadə olunur. |
+
+Əlavə seçimlər: **Agressiv uyğunluq** (daha çox avtomatik sətir, daha çox səhv riski), **uyğunluq həddi** (%), sklad çeki yükləmə və **Başlat** düyməsi.
+        """
+    )
+
+    st.subheader("4. KONTROL tabı (Restoran)")
+    st.markdown(
+        """
+**Məqsəd:** **Orijinal çek** ilə **Analiz nəticəsi** (ixrac faylı) müqayisə olunur.
+
+1. Kontrol üçün sahə seçin (**Horeca** / **Dark Kitchen**).
+2. Orijinal çek və Analiz faylını yükləyin.
+3. **Yoxla** düyməsi ilə çekdə gözlənilən ID-lərin analiz faylında olub-olmadığı yoxlanır; çatışmayanlar cədvəldə göstərilir.
+        """
+    )
+
+    st.subheader("5. İnventarizasiya şöbəsi — addım-addım")
+    st.markdown(
+        """
+**Fayl yükləmə**
+
+- **1Week, 2Week, 3Week, 4Week, MONTH** — hər biri üçün ayrıca **.xlsx** yükləyə bilərsiniz.
+- Eyni pəncərədə yeni fayl seçdikdə **orijinal** nüsxə yenilənir.
+
+**Birinci endirmə — Orijinal**
+
+- Yüklədiyiniz faylın dəyişdirilməmiş surəti.
+
+**İkinci endirmə — Kateqoriya + sıra + filtr** (tək emal faylı)
+
+1. **Kateqoriya (sütun təmizliyi və sıra)**  
+   - Orijinal cədvəldə Excel sütunları **A, B, D, F, K, L, O, P, Q, U** (mövqeyə görə) silinir.  
+   - Qalan cədvəldə **birinci sütun** (şablonda **Kateqoriya**) üzrə **A→Z** mətn sırası ilə sıralanır.
+
+2. **Filtr** (sıradan dərhal sonra, parametrlər expandable paneldə)  
+   - İstəyə görə: boş **Kateqoriya** sətirləri silinir.  
+   - İstəyə görə: boş **Məhsul** sətirləri silinir.  
+   - İstəyə görə: **Fərqin dəyəri** sütununda (**başlıq** ilə tapılır; yoxdursa, emaldan sonra **J** mövqesi götürülür) dəyəri **sıx** olaraq **-10 ilə 10 arasında** olan sətirlər çıxarılır (**-10** və **10** saxlanılır).  
+   - Rəqəmlər Azərbaycan Excel formatında ola bilər (məs. onluq **vergül**).
+
+**Xətalar**
+
+- Əgər emal alınmazsa, pəncərədə **⚠** ilə qısa səbəb göstərilir; fayl strukturunu və sütun adlarını yoxlayın.
+        """
+    )
+
+    st.divider()
+    st.caption(
+        "Əlavə sual və ya yeni qayda təklifi üçün inkişaf komandası ilə əlaqə saxlayın."
+    )
+
+
+@st.dialog("ℹ️ Sayt haqqında — qaydalar və addımlar", width="large")
+def _open_site_info_dialog() -> None:
+    _render_site_info_dialog_body()
+
+
 # --- SİDEBAR ---
 if "panel_branch" not in st.session_state:
     st.session_state.panel_branch = "restoran"
@@ -1371,11 +1471,6 @@ if st.session_state.panel_branch == "restoran":
         if st.sidebar.button(label, key=f"btn_{res_opt}", use_container_width=True):
             st.session_state.selected_res = res_opt
             st.rerun()
-    st.sidebar.info("Ana baza faylları GitHub mənbəsindən avtomatik oxunur.")
-else:
-    st.sidebar.info(
-        "İnventarizasiya üçün faylları əsas iş sahəsindəki pəncərələrə yükləyin."
-    )
 
 # --- PANELLƏR ---
 if st.session_state.panel_branch == "inventar":
@@ -1478,3 +1573,18 @@ if st.session_state.panel_branch == "inventar":
                     )
 elif st.session_state.panel_branch == "restoran":
     _render_restoran_online_panel()
+
+st.markdown(
+    '<div style="height:2rem" aria-hidden="true"></div>',
+    unsafe_allow_html=True,
+)
+_info_l, _info_r = st.columns([3, 1])
+with _info_r:
+    if st.button(
+        "ℹ️ Məlumat",
+        key="site_info_fab_btn",
+        help="Sayt şöbələri, Analiz, Kontrol və İnventarizasiya qaydaları",
+        use_container_width=True,
+        type="secondary",
+    ):
+        _open_site_info_dialog()

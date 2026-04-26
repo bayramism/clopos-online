@@ -1,4 +1,4 @@
-"""Clopos inventar export — addım 1: B,D,F,K,L,O,P,Q,U sütunlarının silinməsi + Kateqoriya A→Z."""
+"""Clopos inventar export — addım 1: Excel A,D,K + adla silinən sütunlar; A→Z sıra son cədvəldə B sütunu üzrə."""
 
 from __future__ import annotations
 
@@ -20,7 +20,24 @@ _DROP_HEADERS = (
     "QUANTITY",
 )
 
-_SORT_COLUMN = "Kateqoriya"
+# Sıralama: bütün silinmələrdən sonra Excel B = ikinci sütun (indeks 1)
+_SORT_COL_ZERO_BASED = 1
+
+# Excel hərfi A, D, K — standart exportda indekslər 0, 3, 10 (başqa silinmələrdən əvvəl)
+_EXCEL_ADK_ZERO_BASED = (0, 3, 10)
+
+
+def _drop_columns_at_excel_positions(
+    df: pd.DataFrame, zero_based_indices: tuple[int, ...]
+) -> pd.DataFrame:
+    cols = list(df.columns)
+    names: list[str] = []
+    for i in zero_based_indices:
+        if 0 <= i < len(cols):
+            names.append(cols[i])
+    if not names:
+        return df
+    return df.drop(columns=list(dict.fromkeys(names)), errors="ignore")
 
 
 def _norm_col(s: object) -> str:
@@ -42,7 +59,7 @@ def _map_drop_columns(df: pd.DataFrame) -> list[str]:
 def process_inventory_categorization_step(
     orig_xlsx: bytes,
 ) -> Tuple[Optional[bytes], Optional[str]]:
-    """Orijinal .xlsx → göstərilən sütunlar silinir, sonra Kateqoriya üzrə A–Z (mətn sırası).
+    """Orijinal .xlsx → göstərilən sütunlar silinir, sonra qalan cədvəldə B sütunu üzrə A–Z (mətn sırası).
 
     Qaytarır: (emal olunmuş faylın baytları, None) və ya (None, xəta mətni).
     """
@@ -57,17 +74,16 @@ def process_inventory_categorization_step(
     if df.empty:
         return None, "Cədvəl boşdur."
 
-    sort_col = None
-    for c in df.columns:
-        if _norm_col(c) == _norm_col(_SORT_COLUMN):
-            sort_col = c
-            break
-    if sort_col is None:
-        preview = ", ".join(map(str, list(df.columns)[:20]))
-        return None, f"'{_SORT_COLUMN}' sütunu tapılmadı. Sütunlar: {preview}"
+    df = _drop_columns_at_excel_positions(df, _EXCEL_ADK_ZERO_BASED)
 
     drop_cols = _map_drop_columns(df)
     df = df.drop(columns=drop_cols, errors="ignore")
+
+    cols = list(df.columns)
+    if len(cols) <= _SORT_COL_ZERO_BASED:
+        preview = ", ".join(map(str, cols[:20]))
+        return None, f"Sıralama üçün B sütunu (indeks {_SORT_COL_ZERO_BASED}) yoxdur. Sütunlar: {preview}"
+    sort_col = cols[_SORT_COL_ZERO_BASED]
 
     df = df.copy()
     df["__inv_sort_k"] = df[sort_col].map(

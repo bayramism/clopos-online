@@ -1,4 +1,4 @@
-"""Clopos inventar export — addım 1: Excel A,D,K + adla silinən sütunlar; A→Z sıra son cədvəldə B sütunu üzrə."""
+"""Clopos inventar export — addım 1: Excel A,B,D,F,K,L,O,P,Q,U silinir; A→Z sıra qalan A sütunundadır (Kateqoriya)."""
 
 from __future__ import annotations
 
@@ -7,26 +7,25 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-# Plan üzrə silinən başlıqlar (Excel A,B,D,F,K,L,O,P,Q,U)
-_DROP_HEADERS = (
-    "İD",
-    "Type",
-    "Vahid",
-    "Son yoxlama",
-    "Köçürmə",
-    "İstehsal",
-    "Hazırlamalardan gələn",
-    "Toplam qalıq",
-    "Ümumi maya dəyəri",
-    "QUANTITY",
+# Orijinal faylda Excel hərfləri A,B,D,F,K,L,O,P,Q,U → 0-based indekslər
+_INVENTORY_DROP_COL_INDEXES: tuple[int, ...] = (
+    0,
+    1,
+    3,
+    5,
+    10,
+    11,
+    14,
+    15,
+    16,
+    20,
 )
 
-# Sıralama: bütün silinmələrdən sonra Excel B = ikinci sütun (indeks 1)
-_SORT_COL_ZERO_BASED = 1
+# Silinmələrdən sonra Excel A = cədvəlin birinci sütunu (şablonda Kateqoriya)
+_SORT_COL_INDEX_AFTER_DROPS = 0
 
 
-
-def _drop_columns_at_excel_positions(
+def _drop_columns_by_original_positions(
     df: pd.DataFrame, zero_based_indices: tuple[int, ...]
 ) -> pd.DataFrame:
     cols = list(df.columns)
@@ -39,29 +38,10 @@ def _drop_columns_at_excel_positions(
     return df.drop(columns=list(dict.fromkeys(names)), errors="ignore")
 
 
-def _norm_col(s: object) -> str:
-    return str(s).strip().casefold()
-
-
-def _map_drop_columns(df: pd.DataFrame) -> list[str]:
-    norm_to_actual: dict[str, str] = {}
-    for c in df.columns:
-        norm_to_actual.setdefault(_norm_col(c), str(c).strip())
-    drop_actual: list[str] = []
-    for want in _DROP_HEADERS:
-        nw = _norm_col(want)
-        if nw in norm_to_actual:
-            drop_actual.append(norm_to_actual[nw])
-    return drop_actual
-
-
 def process_inventory_categorization_step(
     orig_xlsx: bytes,
 ) -> Tuple[Optional[bytes], Optional[str]]:
-    """Orijinal .xlsx → göstərilən sütunlar silinir, sonra qalan cədvəldə B sütunu üzrə A–Z (mətn sırası).
-
-    Qaytarır: (emal olunmuş faylın baytları, None) və ya (None, xəta mətni).
-    """
+    """A,B,D,F,K,L,O,P,Q,U mövqelərini sil; sonra qalan cədvəldə A sütunu üzrə A→Z sırala."""
     try:
         buf = io.BytesIO(orig_xlsx)
         xlf = pd.ExcelFile(buf, engine="openpyxl")
@@ -73,16 +53,14 @@ def process_inventory_categorization_step(
     if df.empty:
         return None, "Cədvəl boşdur."
 
-    df = _drop_columns_at_excel_positions(df, _EXCEL_ADK_ZERO_BASED)
-
-    drop_cols = _map_drop_columns(df)
-    df = df.drop(columns=drop_cols, errors="ignore")
+    df = _drop_columns_by_original_positions(df, _INVENTORY_DROP_COL_INDEXES)
 
     cols = list(df.columns)
-    if len(cols) <= _SORT_COL_ZERO_BASED:
-        preview = ", ".join(map(str, cols[:20]))
-        return None, f"Sıralama üçün B sütunu (indeks {_SORT_COL_ZERO_BASED}) yoxdur. Sütunlar: {preview}"
-    sort_col = cols[_SORT_COL_ZERO_BASED]
+    if len(cols) <= _SORT_COL_INDEX_AFTER_DROPS:
+        preview = ", ".join(map(str, cols[:25]))
+        return None, f"Sıralama üçün A sütunu yoxdur. Qalan sütunlar: {preview}"
+
+    sort_col = cols[_SORT_COL_INDEX_AFTER_DROPS]
 
     df = df.copy()
     df["__inv_sort_k"] = df[sort_col].map(

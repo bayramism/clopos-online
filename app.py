@@ -1208,7 +1208,7 @@ if st.session_state.panel_branch == "inventar":
     )
     st.markdown(
         "**1–4 həftə:** yüklənən faylın **orijinalı** yadda saxlanılır; **Kateqoriya addımı** — "
-        "B,D,F,K,L,O,P,Q,U sütunları silinir, **Kateqoriya** üzrə A→Z sıralanır; hər dövr üçün ayrıca endirin. "
+        "əlavə olaraq Excel **A, D, K** mövqeləri silinir; sonra **B,D,F,K,L,O,P,Q,U** başlıqları silinir; qalan cədvəldə **B sütunu** üzrə A→Z sıralanır; hər dövr üçün ayrıca endirin. "
         "**MONTH** üçün eyni addım müvəqqətidir; ayrıca məntiq sonraya qalır."
     )
 
@@ -1259,9 +1259,9 @@ if st.session_state.panel_branch == "inventar":
                     st.caption(f"⚠ {err}")
                 else:
                     st.download_button(
-                        "📥 Kateqoriya + sıra",
+                        "📥 B sütunu + sıra",
                         data=proc,
-                        file_name=f"{inv_label}_{stem}_kateqoriya_emal.xlsx",
+                        file_name=f"{inv_label}_{stem}_b_sutunu_emal.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key=f"inv_dl_proc_{inv_key}",
                         use_container_width=True,

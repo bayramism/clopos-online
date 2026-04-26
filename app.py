@@ -9,7 +9,10 @@ import streamlit as st
 from openpyxl.styles import Font
 from rapidfuzz import fuzz, process
 
-from inventory_transform import process_inventory_categorization_step
+from inventory_transform import (
+    InventoryFilterOptions,
+    process_inventory_emal_pipeline,
+)
 from rules import merged_special_rules  # ümumi + restoran qaydaları
 
 st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
@@ -1207,10 +1210,30 @@ if st.session_state.panel_branch == "inventar":
         unsafe_allow_html=True,
     )
     st.markdown(
-        "**1–4 həftə:** yüklənən faylın **orijinalı** yadda saxlanılır; **Kateqoriya addımı** — "
-        "orijinal cədvəldə Excel **A,B,D,F,K,L,O,P,Q,U** sütunları silinir; qalan cədvəldə **A sütunu** (Kateqoriya) üzrə A→Z sıralanır; hər dövr üçün ayrıca endirin. "
-        "**MONTH** üçün eyni addım müvəqqətidir; ayrıca məntiq sonraya qalır."
+        "**1–4 həftə:** yüklənən faylın **orijinalı** yadda saxlanılır; **ikinci endirmə** — əvvəl "
+        "Excel **A,B,D,F,K,L,O,P,Q,U** silinir, **A sütunu** (Kateqoriya) üzrə A→Z sıra, sonra **filtr**: boş sətirlər "
+        "və **Fərqin dəyəri** (J): **-10-dan böyük və 10-dan kiçik** sıx intervaldakı rəqəmlər silinir (**-10** və **10** saxlanır) (tək `.xlsx`). "
+        "**MONTH** müvəqqəti eyni zəncirdir."
     )
+    with st.expander("🔎 Filtr parametrləri (ikinci endirmədə)", expanded=False):
+        st.caption(
+            "Sıra (A→Z) tətbiq olunduqdan sonra: boş sətirlər və **Fərqin dəyəri** üzrə sıra filtri."
+        )
+        st.checkbox(
+            "Boş **Kateqoriya** sətirlərini sil",
+            value=True,
+            key="inv_filter_drop_empty_kat",
+        )
+        st.checkbox(
+            "Boş **Məhsul** sətirlərini sil",
+            value=True,
+            key="inv_filter_drop_empty_mah",
+        )
+        st.checkbox(
+            "**Fərqin dəyəri** (J): -10 ilə 10 arası **sıx** intervaldakı sətirləri sil (-10 və 10 saxla)",
+            value=True,
+            key="inv_filter_exclude_farqin_mid",
+        )
 
     def _inv_fingerprint(up):
         return f"{up.name}:{up.size}" if up is not None else None
@@ -1254,13 +1277,26 @@ if st.session_state.panel_branch == "inventar":
                     key=f"inv_dl_orig_{inv_key}",
                     use_container_width=True,
                 )
-                proc, err = process_inventory_categorization_step(orig)
-                if err:
-                    st.caption(f"⚠ {err}")
+                _inv_opts = InventoryFilterOptions(
+                    drop_empty_kateqoriya=st.session_state.get(
+                        "inv_filter_drop_empty_kat", True
+                    ),
+                    drop_empty_mahsul=st.session_state.get(
+                        "inv_filter_drop_empty_mah", True
+                    ),
+                    exclude_farqin_open_interval_neg10_pos10=st.session_state.get(
+                        "inv_filter_exclude_farqin_mid", True
+                    ),
+                )
+                proc_emal, err_emal = process_inventory_emal_pipeline(
+                    orig, filter_options=_inv_opts
+                )
+                if err_emal:
+                    st.caption(f"⚠ {err_emal}")
                 else:
                     st.download_button(
-                        "📥 A sütunu (Kateqoriya) + sıra",
-                        data=proc,
+                        "📥 Kateqoriya + sıra + filtr",
+                        data=proc_emal,
                         file_name=f"{inv_label}_{stem}_kateqoriya_emal.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key=f"inv_dl_proc_{inv_key}",

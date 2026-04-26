@@ -766,7 +766,7 @@ st.markdown(
     f"<h3 style='text-align: center;'>{curr} | Online Panel</h3>",
     unsafe_allow_html=True,
 )
-tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
+tab1, tab2, tab_inv = st.tabs(["🚀 ANALİZ", "🔍 KONTROL", "📦 İnventarizasiya"])
 
 with tab1:
     st.caption(
@@ -1180,3 +1180,21 @@ with tab2:
             st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
         else:
             st.markdown("**Problem:** Uyğun ana baza tapılmadı.")
+
+
+with tab_inv:
+    st.caption(
+        "Clopos həftəlik inventar Excel fayllarını bura yükləyin. Bu mərhələdə yalnız yükləmə; "
+        "emal və Google hesabatına köçürmə sonrakı addımda əlavə olunacaq."
+    )
+    inv_slots = [
+        ("1Week", "inv_week1"),
+        ("2Week", "inv_week2"),
+        ("3Week", "inv_week3"),
+        ("4Week", "inv_week4"),
+        ("MONTH", "inv_month"),
+    ]
+    inv_cols = st.columns(5)
+    for inv_col, (inv_label, inv_key) in zip(inv_cols, inv_slots):
+        with inv_col:
+            st.file_uploader(inv_label, type=["xlsx"], key=inv_key)

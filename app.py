@@ -9,6 +9,7 @@ import streamlit as st
 from openpyxl.styles import Font
 from rapidfuzz import fuzz, process
 
+from inventory_transform import process_inventory_categorization_step
 from rules import merged_special_rules  # ümumi + restoran qaydaları
 
 st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
@@ -1206,9 +1207,24 @@ if st.session_state.panel_branch == "inventar":
         unsafe_allow_html=True,
     )
     st.markdown(
-        "Clopos həftəlik inventar **.xlsx** fayllarını dövr üzrə yükləyin. Bu mərhələdə yalnız yükləmə; "
-        "emal sonrakı addımda əlavə olunacaq."
+        "**1–4 həftə:** yüklənən faylın **orijinalı** yadda saxlanılır; **Kateqoriya addımı** — "
+        "B,D,F,K,L,O,P,Q,U sütunları silinir, **Kateqoriya** üzrə A→Z sıralanır; hər dövr üçün ayrıca endirin. "
+        "**MONTH** üçün eyni addım müvəqqətidir; ayrıca məntiq sonraya qalır."
     )
+
+    def _inv_fingerprint(up):
+        return f"{up.name}:{up.size}" if up is not None else None
+
+    def _sync_inv_original(uploaded, uploader_key: str) -> None:
+        fp = _inv_fingerprint(uploaded)
+        prev = st.session_state.get(f"_inv_fp_{uploader_key}")
+        if fp != prev:
+            st.session_state[f"_inv_fp_{uploader_key}"] = fp
+            if uploaded is not None:
+                st.session_state[f"_inv_orig_{uploader_key}"] = uploaded.getvalue()
+            else:
+                st.session_state.pop(f"_inv_orig_{uploader_key}", None)
+
     inv_slots = [
         ("1Week", "inv_week1"),
         ("2Week", "inv_week2"),
@@ -1220,6 +1236,35 @@ if st.session_state.panel_branch == "inventar":
     for inv_col, (inv_label, inv_key) in zip(inv_cols, inv_slots):
         with inv_col:
             with st.container(border=True):
-                st.file_uploader(inv_label, type=["xlsx"], key=inv_key)
+                up = st.file_uploader(inv_label, type=["xlsx"], key=inv_key)
+                _sync_inv_original(up, inv_key)
+                orig = st.session_state.get(f"_inv_orig_{inv_key}")
+                if orig is None:
+                    continue
+                stem = (
+                    os.path.splitext(up.name)[0][:80]
+                    if up is not None
+                    else inv_label
+                )
+                st.download_button(
+                    "📥 Orijinal",
+                    data=orig,
+                    file_name=f"{inv_label}_{stem}_orijinal.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"inv_dl_orig_{inv_key}",
+                    use_container_width=True,
+                )
+                proc, err = process_inventory_categorization_step(orig)
+                if err:
+                    st.caption(f"⚠ {err}")
+                else:
+                    st.download_button(
+                        "📥 Kateqoriya + sıra",
+                        data=proc,
+                        file_name=f"{inv_label}_{stem}_kateqoriya_emal.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"inv_dl_proc_{inv_key}",
+                        use_container_width=True,
+                    )
 elif st.session_state.panel_branch == "restoran":
     _render_restoran_online_panel()

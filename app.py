@@ -1351,7 +1351,7 @@ def _render_site_info_dialog_body() -> None:
     """Ümumi təlimat — yeni istifadəçi üçün strukturlu məlumat."""
     st.caption(
         "Bu pəncərəni istənilən vaxt açmaq üçün səhifənin **ən aşağısında, sağ tərəfdə** "
-        "**ℹ️ Məlumat** düyməsini sıxın."
+        "**ℹ️ Məlumat** düyməsini sıxın. Qaydalar tətbiqdə dəyişiklik olduqca bu bölmədə yenilənir."
     )
     st.markdown(
         "Bu səhifə **iki əsas şöbədən** ibarətdir. Sol paneldə **Şöbə** seçiminə görə "
@@ -1365,7 +1365,7 @@ def _render_site_info_dialog_body() -> None:
 - **Restoran** — sklad **çək** faylının Clopos **ana baza** ilə uyğunlaşdırılması (Analiz) və nəticənin yoxlanması (Kontrol).
 - **İnventarizasiya** — Clopos-dan götürülmüş **həftəlik / ay** inventar Excel çıxışlarının eyni qaydalarla emalı (sütun təmizliyi, sıra, filtr).
 
-Sol paneldə **Restoran** aktiv olanda həmin restoranın düyməsini seçin; **İnventarizasiya** aktiv olanda isə faylları əsas sahədəki **1Week … MONTH** pəncərələrinə yükləyin.
+Sol paneldə **Restoran** aktiv olanda həmin restoranın düyməsini seçin; **İnventarizasiya** aktiv olanda isə əvvəl inventar restoranını seçin, sonra faylları əsas sahədəki **1Week … MONTH** pəncərələrinə yükləyin.
         """
     )
 
@@ -1453,6 +1453,12 @@ if "panel_branch" not in st.session_state:
 res_options = discover_restaurants()
 if st.session_state.selected_res not in res_options:
     st.session_state.selected_res = res_options[0]
+if "selected_inv_res" not in st.session_state:
+    st.session_state.selected_inv_res = st.session_state.selected_res
+if st.session_state.selected_inv_res not in res_options:
+    st.session_state.selected_inv_res = res_options[0]
+if "_inv_saved_by_restaurant" not in st.session_state:
+    st.session_state._inv_saved_by_restaurant = {}
 
 st.sidebar.markdown("#### Şöbə")
 st.sidebar.radio(
@@ -1471,18 +1477,28 @@ if st.session_state.panel_branch == "restoran":
         if st.sidebar.button(label, key=f"btn_{res_opt}", use_container_width=True):
             st.session_state.selected_res = res_opt
             st.rerun()
+elif st.session_state.panel_branch == "inventar":
+    st.sidebar.markdown("##### İnventarizasiya restoranı")
+    st.sidebar.selectbox(
+        "Restoran",
+        res_options,
+        key="selected_inv_res",
+        help="Fayllar restoran üzrə ayrıca saxlanılır.",
+    )
 
 # --- PANELLƏR ---
 if st.session_state.panel_branch == "inventar":
+    inv_rest = st.session_state.selected_inv_res
+    saved_by_rest = st.session_state._inv_saved_by_restaurant.setdefault(inv_rest, {})
     st.markdown(
-        "<h3 style='text-align: center;'>📦 İnventarizasiya</h3>",
+        f"<h3 style='text-align: center;'>📦 İnventarizasiya | {inv_rest}</h3>",
         unsafe_allow_html=True,
     )
     st.markdown(
-        "**1–4 həftə:** yüklənən faylın **orijinalı** yadda saxlanılır; **ikinci endirmə** — əvvəl "
+        "**1–4 həftə:** yüklənən faylın **orijinalı** restoran üzrə yadda saxlanılır; **ikinci endirmə** — əvvəl "
         "Excel **A,B,D,F,K,L,O,P,Q,U** silinir, **A sütunu** (Kateqoriya) üzrə A→Z sıra, sonra **filtr**: boş sətirlər "
         "və **Fərqin dəyəri** (J): **-10-dan böyük və 10-dan kiçik** sıx intervaldakı rəqəmlər silinir (**-10** və **10** saxlanır) (tək `.xlsx`). "
-        "**MONTH** müvəqqəti eyni zəncirdir."
+        "**MONTH** sonrakı yekunlaşdırma üçün saxlanır."
     )
     with st.expander("🔎 Filtr parametrləri (ikinci endirmədə)", expanded=False):
         st.caption(
@@ -1504,19 +1520,6 @@ if st.session_state.panel_branch == "inventar":
             key="inv_filter_exclude_farqin_mid",
         )
 
-    def _inv_fingerprint(up):
-        return f"{up.name}:{up.size}" if up is not None else None
-
-    def _sync_inv_original(uploaded, uploader_key: str) -> None:
-        fp = _inv_fingerprint(uploaded)
-        prev = st.session_state.get(f"_inv_fp_{uploader_key}")
-        if fp != prev:
-            st.session_state[f"_inv_fp_{uploader_key}"] = fp
-            if uploaded is not None:
-                st.session_state[f"_inv_orig_{uploader_key}"] = uploaded.getvalue()
-            else:
-                st.session_state.pop(f"_inv_orig_{uploader_key}", None)
-
     inv_slots = [
         ("1Week", "inv_week1"),
         ("2Week", "inv_week2"),
@@ -1524,26 +1527,40 @@ if st.session_state.panel_branch == "inventar":
         ("4Week", "inv_week4"),
         ("MONTH", "inv_month"),
     ]
+    week_keys = [x[1] for x in inv_slots if x[1] != "inv_month"]
+    loaded_weeks = sum(1 for wk in week_keys if wk in saved_by_rest)
+    if loaded_weeks == 4:
+        st.success("1-4 həftə faylları bu restoran üçün saxlanılıb. MONTH yekununa keçə bilərsiniz.")
+    else:
+        st.info(f"Bu restoran üçün saxlanmış həftə faylları: {loaded_weeks}/4")
+
     inv_cols = st.columns(5)
     for inv_col, (inv_label, inv_key) in zip(inv_cols, inv_slots):
         with inv_col:
             with st.container(border=True):
-                up = st.file_uploader(inv_label, type=["xlsx"], key=inv_key)
-                _sync_inv_original(up, inv_key)
-                orig = st.session_state.get(f"_inv_orig_{inv_key}")
-                if orig is None:
+                uploader_key = f"{inv_key}_{inv_rest}_uploader"
+                up = st.file_uploader(inv_label, type=["xlsx"], key=uploader_key)
+                if up is not None:
+                    saved_by_rest[inv_key] = {
+                        "name": up.name,
+                        "bytes": up.getvalue(),
+                    }
+                saved = saved_by_rest.get(inv_key)
+                if not saved:
                     continue
-                stem = (
-                    os.path.splitext(up.name)[0][:80]
-                    if up is not None
-                    else inv_label
-                )
+                orig = saved["bytes"]
+                stem = os.path.splitext(saved["name"])[0][:80]
+                st.caption(f"Saxlanıb: `{saved['name']}`")
+                if st.button("🗑️ Sil", key=f"inv_clear_{inv_key}_{inv_rest}", use_container_width=True):
+                    saved_by_rest.pop(inv_key, None)
+                    st.session_state.pop(uploader_key, None)
+                    st.rerun()
                 st.download_button(
                     "📥 Orijinal",
                     data=orig,
                     file_name=f"{inv_label}_{stem}_orijinal.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"inv_dl_orig_{inv_key}",
+                    key=f"inv_dl_orig_{inv_key}_{inv_rest}",
                     use_container_width=True,
                 )
                 _inv_opts = InventoryFilterOptions(
@@ -1568,7 +1585,7 @@ if st.session_state.panel_branch == "inventar":
                         data=proc_emal,
                         file_name=f"{inv_label}_{stem}_kateqoriya_emal.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"inv_dl_proc_{inv_key}",
+                        key=f"inv_dl_proc_{inv_key}_{inv_rest}",
                         use_container_width=True,
                     )
 elif st.session_state.panel_branch == "restoran":

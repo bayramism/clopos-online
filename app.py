@@ -747,18 +747,34 @@ def _first_id_for_name(df_base, m_name):
 
 
 # --- SİDEBAR ---
-st.sidebar.markdown("#### 🏢 Restoran seçimi")
 res_options = discover_restaurants()
 if st.session_state.selected_res not in res_options:
     st.session_state.selected_res = res_options[0]
 
-for res_opt in res_options:
-    label = f"{res_opt} ✅" if st.session_state.selected_res == res_opt else res_opt
-    if st.sidebar.button(label, key=f"btn_{res_opt}", use_container_width=True):
-        st.session_state.selected_res = res_opt
-        st.rerun()
+sb_rest, sb_inv = st.sidebar.tabs(["🏢 Restoran", "📦 İnventarizasiya"])
+with sb_rest:
+    st.markdown("##### Restoran seçimi")
+    for res_opt in res_options:
+        label = f"{res_opt} ✅" if st.session_state.selected_res == res_opt else res_opt
+        if st.button(label, key=f"btn_{res_opt}", use_container_width=True):
+            st.session_state.selected_res = res_opt
+            st.rerun()
+    st.info("Ana baza faylları GitHub mənbəsindən avtomatik oxunur.")
 
-st.sidebar.info("Ana baza faylları GitHub mənbəsindən avtomatik oxunur.")
+with sb_inv:
+    st.caption(
+        "Clopos həftəlik inventar Excel fayllarını bura yükləyin. Bu mərhələdə yalnız yükləmə; "
+        "emal və Google hesabatına köçürmə sonrakı addımda əlavə olunacaq."
+    )
+    inv_slots = [
+        ("1Week", "inv_week1"),
+        ("2Week", "inv_week2"),
+        ("3Week", "inv_week3"),
+        ("4Week", "inv_week4"),
+        ("MONTH", "inv_month"),
+    ]
+    for inv_label, inv_key in inv_slots:
+        st.file_uploader(inv_label, type=["xlsx"], key=inv_key)
 
 # --- PANELLƏR ---
 curr = st.session_state.selected_res
@@ -766,7 +782,7 @@ st.markdown(
     f"<h3 style='text-align: center;'>{curr} | Online Panel</h3>",
     unsafe_allow_html=True,
 )
-tab1, tab2, tab_inv = st.tabs(["🚀 ANALİZ", "🔍 KONTROL", "📦 İnventarizasiya"])
+tab1, tab2 = st.tabs(["🚀 ANALİZ", "🔍 KONTROL"])
 
 with tab1:
     st.caption(
@@ -1180,21 +1196,3 @@ with tab2:
             st.table(pd.DataFrame(missing, columns=["Tapılmayanlar"]))
         else:
             st.markdown("**Problem:** Uyğun ana baza tapılmadı.")
-
-
-with tab_inv:
-    st.caption(
-        "Clopos həftəlik inventar Excel fayllarını bura yükləyin. Bu mərhələdə yalnız yükləmə; "
-        "emal və Google hesabatına köçürmə sonrakı addımda əlavə olunacaq."
-    )
-    inv_slots = [
-        ("1Week", "inv_week1"),
-        ("2Week", "inv_week2"),
-        ("3Week", "inv_week3"),
-        ("4Week", "inv_week4"),
-        ("MONTH", "inv_month"),
-    ]
-    inv_cols = st.columns(5)
-    for inv_col, (inv_label, inv_key) in zip(inv_cols, inv_slots):
-        with inv_col:
-            st.file_uploader(inv_label, type=["xlsx"], key=inv_key)

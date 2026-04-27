@@ -1,8 +1,14 @@
 import io
+import json
 import math
 import os
 import re
+import sqlite3
 import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Tuple
@@ -29,6 +35,203 @@ _INVENTORY_DROP_COL_INDEXES: tuple[int, ...] = (
     20,
 )
 _SORT_COL_INDEX_AFTER_DROPS = 0
+_INV_DB_PATH = os.path.join(os.path.dirname(__file__), "inventory_store.db")
+_INV_WEEK_SLOTS = ("inv_week1", "inv_week2", "inv_week3", "inv_week4")
+
+
+def _inv_remote_cfg() -> Optional[dict]:
+    """Optional remote persistence via Supabase REST (deploy-proof storage)."""
+    try:
+        url = st.secrets.get("SUPABASE_URL", "").strip()
+        key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        table = st.secrets.get("SUPABASE_INV_TABLE", "inventory_files").strip()
+    except Exception:
+        return None
+    if not url or not key:
+        return None
+    return {
+        "url": url.rstrip("/"),
+        "key": key,
+        "table": table or "inventory_files",
+    }
+
+
+def _inv_remote_request(
+    method: str,
+    path: str,
+    query: Optional[dict] = None,
+    payload: Optional[list | dict] = None,
+) -> list | dict | None:
+    cfg = _inv_remote_cfg()
+    if not cfg:
+        return None
+    q = ""
+    if query:
+        q = "?" + urllib.parse.urlencode(query, safe="(),=*.")
+    url = f"{cfg['url']}{path}{q}"
+    body = None
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url=url, method=method.upper(), data=body)
+    req.add_header("apikey", cfg["key"])
+    req.add_header("Authorization", f"Bearer {cfg['key']}")
+    req.add_header("Content-Type", "application/json")
+    if method.upper() in ("POST", "PATCH", "PUT"):
+        req.add_header("Prefer", "resolution=merge-duplicates,return=representation")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+            if not raw:
+                return {}
+            return json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _inv_db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(_INV_DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _inv_db_init() -> None:
+    with _inv_db_connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS inventory_files (
+                restaurant TEXT NOT NULL,
+                slot_key TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_bytes BLOB NOT NULL,
+                uploaded_at TEXT NOT NULL,
+                PRIMARY KEY (restaurant, slot_key)
+            )
+            """
+        )
+
+
+def _inv_store_file(restaurant: str, slot_key: str, file_name: str, file_bytes: bytes) -> None:
+    cfg = _inv_remote_cfg()
+    if cfg:
+        payload = [
+            {
+                "restaurant": restaurant,
+                "slot_key": slot_key,
+                "file_name": file_name,
+                "file_b64": b64encode(file_bytes).decode("ascii"),
+                "uploaded_at": datetime.utcnow().isoformat(),
+            }
+        ]
+        out = _inv_remote_request(
+            "POST",
+            f"/rest/v1/{cfg['table']}",
+            payload=payload,
+        )
+        if out is not None:
+            return
+    with _inv_db_connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO inventory_files (restaurant, slot_key, file_name, file_bytes, uploaded_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(restaurant, slot_key) DO UPDATE SET
+                file_name = excluded.file_name,
+                file_bytes = excluded.file_bytes,
+                uploaded_at = excluded.uploaded_at
+            """,
+            (restaurant, slot_key, file_name, file_bytes, datetime.utcnow().isoformat()),
+        )
+
+
+def _inv_get_file(restaurant: str, slot_key: str) -> Optional[dict]:
+    cfg = _inv_remote_cfg()
+    if cfg:
+        rows = _inv_remote_request(
+            "GET",
+            f"/rest/v1/{cfg['table']}",
+            query={
+                "select": "file_name,file_b64,uploaded_at",
+                "restaurant": f"eq.{restaurant}",
+                "slot_key": f"eq.{slot_key}",
+                "limit": "1",
+            },
+        )
+        if isinstance(rows, list) and rows:
+            row = rows[0]
+            try:
+                file_bytes = b64decode(row.get("file_b64", ""))
+            except Exception:
+                file_bytes = b""
+            return {
+                "name": row.get("file_name", f"{slot_key}.xlsx"),
+                "bytes": file_bytes,
+                "uploaded_at": row.get("uploaded_at", ""),
+            }
+    with _inv_db_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT file_name, file_bytes, uploaded_at
+            FROM inventory_files
+            WHERE restaurant = ? AND slot_key = ?
+            """,
+            (restaurant, slot_key),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "name": row["file_name"],
+        "bytes": row["file_bytes"],
+        "uploaded_at": row["uploaded_at"],
+    }
+
+
+def _inv_delete_file(restaurant: str, slot_key: str) -> None:
+    cfg = _inv_remote_cfg()
+    if cfg:
+        out = _inv_remote_request(
+            "DELETE",
+            f"/rest/v1/{cfg['table']}",
+            query={
+                "restaurant": f"eq.{restaurant}",
+                "slot_key": f"eq.{slot_key}",
+            },
+        )
+        if out is not None:
+            return
+    with _inv_db_connect() as conn:
+        conn.execute(
+            "DELETE FROM inventory_files WHERE restaurant = ? AND slot_key = ?",
+            (restaurant, slot_key),
+        )
+
+
+def _inv_count_saved_weeks(restaurant: str) -> int:
+    cfg = _inv_remote_cfg()
+    if cfg:
+        slot_csv = ",".join(_INV_WEEK_SLOTS)
+        rows = _inv_remote_request(
+            "GET",
+            f"/rest/v1/{cfg['table']}",
+            query={
+                "select": "slot_key",
+                "restaurant": f"eq.{restaurant}",
+                "slot_key": f"in.({slot_csv})",
+            },
+        )
+        if isinstance(rows, list):
+            return len(rows)
+    placeholders = ",".join("?" for _ in _INV_WEEK_SLOTS)
+    params = [restaurant, *_INV_WEEK_SLOTS]
+    with _inv_db_connect() as conn:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS c
+            FROM inventory_files
+            WHERE restaurant = ? AND slot_key IN ({placeholders})
+            """,
+            params,
+        ).fetchone()
+    return int(row["c"]) if row else 0
 
 
 def _inv_drop_columns_by_original_positions(
@@ -190,6 +393,7 @@ def process_inventory_emal_pipeline(
 
 
 st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
+_inv_db_init()
 
 if "selected_res" not in st.session_state:
     st.session_state.selected_res = "ROOM"
@@ -1412,6 +1616,7 @@ Sol paneldə **Restoran** aktiv olanda həmin restoranın düyməsini seçin; **
 
 - **1Week, 2Week, 3Week, 4Week, MONTH** — hər biri üçün ayrıca **.xlsx** yükləyə bilərsiniz.
 - Eyni pəncərədə yeni fayl seçdikdə **orijinal** nüsxə yenilənir.
+- Fayllar restoran üzrə serverdə saxlanılır; səhifə yenilənsə də yenidən görünür.
 
 **Birinci endirmə — Orijinal**
 
@@ -1457,8 +1662,6 @@ if "selected_inv_res" not in st.session_state:
     st.session_state.selected_inv_res = st.session_state.selected_res
 if st.session_state.selected_inv_res not in res_options:
     st.session_state.selected_inv_res = res_options[0]
-if "_inv_saved_by_restaurant" not in st.session_state:
-    st.session_state._inv_saved_by_restaurant = {}
 
 st.sidebar.markdown("#### Şöbə")
 st.sidebar.radio(
@@ -1489,11 +1692,18 @@ elif st.session_state.panel_branch == "inventar":
 # --- PANELLƏR ---
 if st.session_state.panel_branch == "inventar":
     inv_rest = st.session_state.selected_inv_res
-    saved_by_rest = st.session_state._inv_saved_by_restaurant.setdefault(inv_rest, {})
+    inv_remote_on = _inv_remote_cfg() is not None
     st.markdown(
         f"<h3 style='text-align: center;'>📦 İnventarizasiya | {inv_rest}</h3>",
         unsafe_allow_html=True,
     )
+    if inv_remote_on:
+        st.success("Deploy-proof yaddaş aktivdir (Supabase remote storage).")
+    else:
+        st.warning(
+            "Hazırda lokal yaddaş aktivdir. Deploy sonrası saxlama üçün `st.secrets`-də "
+            "`SUPABASE_URL` və `SUPABASE_SERVICE_ROLE_KEY` əlavə edin."
+        )
     st.markdown(
         "**1–4 həftə:** yüklənən faylın **orijinalı** restoran üzrə yadda saxlanılır; **ikinci endirmə** — əvvəl "
         "Excel **A,B,D,F,K,L,O,P,Q,U** silinir, **A sütunu** (Kateqoriya) üzrə A→Z sıra, sonra **filtr**: boş sətirlər "
@@ -1527,8 +1737,7 @@ if st.session_state.panel_branch == "inventar":
         ("4Week", "inv_week4"),
         ("MONTH", "inv_month"),
     ]
-    week_keys = [x[1] for x in inv_slots if x[1] != "inv_month"]
-    loaded_weeks = sum(1 for wk in week_keys if wk in saved_by_rest)
+    loaded_weeks = _inv_count_saved_weeks(inv_rest)
     if loaded_weeks == 4:
         st.success("1-4 həftə faylları bu restoran üçün saxlanılıb. MONTH yekununa keçə bilərsiniz.")
     else:
@@ -1541,18 +1750,15 @@ if st.session_state.panel_branch == "inventar":
                 uploader_key = f"{inv_key}_{inv_rest}_uploader"
                 up = st.file_uploader(inv_label, type=["xlsx"], key=uploader_key)
                 if up is not None:
-                    saved_by_rest[inv_key] = {
-                        "name": up.name,
-                        "bytes": up.getvalue(),
-                    }
-                saved = saved_by_rest.get(inv_key)
+                    _inv_store_file(inv_rest, inv_key, up.name, up.getvalue())
+                saved = _inv_get_file(inv_rest, inv_key)
                 if not saved:
                     continue
                 orig = saved["bytes"]
                 stem = os.path.splitext(saved["name"])[0][:80]
                 st.caption(f"Saxlanıb: `{saved['name']}`")
                 if st.button("🗑️ Sil", key=f"inv_clear_{inv_key}_{inv_rest}", use_container_width=True):
-                    saved_by_rest.pop(inv_key, None)
+                    _inv_delete_file(inv_rest, inv_key)
                     st.session_state.pop(uploader_key, None)
                     st.rerun()
                 st.download_button(

@@ -1692,6 +1692,10 @@ elif st.session_state.panel_branch == "inventar":
 # --- PANELLƏR ---
 if st.session_state.panel_branch == "inventar":
     inv_rest = st.session_state.selected_inv_res
+    inv_rest_label = inv_rest.strip()
+    inv_rest_slug = re.sub(r"[^a-z0-9]+", "_", inv_rest_label.lower()).strip("_")
+    if not inv_rest_slug:
+        inv_rest_slug = "restoran"
     inv_remote_on = _inv_remote_cfg() is not None
     st.markdown(
         f"<h3 style='text-align: center;'>📦 İnventarizasiya | {inv_rest}</h3>",
@@ -1774,9 +1778,9 @@ if st.session_state.panel_branch == "inventar":
                         st.caption(f"⚠ {cat_err}")
                         continue
                     st.download_button(
-                        f"📥 Finestra Week {week_no}",
+                        f"📥 {inv_rest_label} week {week_no}",
                         data=cat_only,
-                        file_name=f"finestra_week_{week_no}.xlsx",
+                        file_name=f"{inv_rest_slug}_week_{week_no}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key=f"inv_dl_finestra_{inv_key}_{inv_rest}",
                         use_container_width=True,
@@ -1813,9 +1817,9 @@ if st.session_state.panel_branch == "inventar":
                         st.caption(f"⚠ {err_emal}")
                     else:
                         st.download_button(
-                            f"📥 Weekly analysis Week {week_no}",
+                            f"📥 {inv_rest_label} weekly analysis {week_no}",
                             data=proc_emal,
-                            file_name=f"weekly_analysis_week_{week_no}.xlsx",
+                            file_name=f"{inv_rest_slug}_weekly_analysis_{week_no}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key=f"inv_dl_proc_{inv_key}_{inv_rest}",
                             use_container_width=True,

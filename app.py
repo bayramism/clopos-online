@@ -1705,7 +1705,12 @@ if st.session_state.panel_branch == "inventar":
             "`SUPABASE_URL` və `SUPABASE_SERVICE_ROLE_KEY` əlavə edin."
         )
     st.markdown(
-        "**1–4 həftə:** yüklənən faylın **orijinalı** restoran üzrə yadda saxlanılır; **ikinci endirmə** — əvvəl "
+        "**1–4 həftə:** yüklənən fayl restoran üzrə yadda saxlanılır; **Finestra Week N** export-u üçün əvvəl "
+        "Excel **A,B,D,F,K,L,O,P,Q,U** silinir və **A sütunu** (Kateqoriya) üzrə A→Z sıra verilir; "
+        "**Weekly analysis Week N** export-u isə mövcud "
+        "**Kateqoriya + sıra + filtr** zənciri ilə yaradılır. "
+        "**MONTH** üçün yalnız **Finestra** axını (Kateqoriya + sıra) istifadə olunur. "
+        "Filtr axınında (yalnız həftəlik baxış üçün) "
         "Excel **A,B,D,F,K,L,O,P,Q,U** silinir, **A sütunu** (Kateqoriya) üzrə A→Z sıra, sonra **filtr**: boş sətirlər "
         "və **Fərqin dəyəri** (J): **-10-dan böyük və 10-dan kiçik** sıx intervaldakı rəqəmlər silinir (**-10** və **10** saxlanır) (tək `.xlsx`). "
         "**MONTH** sonrakı yekunlaşdırma üçün saxlanır."
@@ -1761,39 +1766,60 @@ if st.session_state.panel_branch == "inventar":
                     _inv_delete_file(inv_rest, inv_key)
                     st.session_state.pop(uploader_key, None)
                     st.rerun()
-                st.download_button(
-                    "📥 Orijinal",
-                    data=orig,
-                    file_name=f"{inv_label}_{stem}_orijinal.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"inv_dl_orig_{inv_key}_{inv_rest}",
-                    use_container_width=True,
-                )
-                _inv_opts = InventoryFilterOptions(
-                    drop_empty_kateqoriya=st.session_state.get(
-                        "inv_filter_drop_empty_kat", True
-                    ),
-                    drop_empty_mahsul=st.session_state.get(
-                        "inv_filter_drop_empty_mah", True
-                    ),
-                    exclude_farqin_open_interval_neg10_pos10=st.session_state.get(
-                        "inv_filter_exclude_farqin_mid", True
-                    ),
-                )
-                proc_emal, err_emal = process_inventory_emal_pipeline(
-                    orig, filter_options=_inv_opts
-                )
-                if err_emal:
-                    st.caption(f"⚠ {err_emal}")
-                else:
+                is_week_slot = inv_key != "inv_month"
+                week_no = inv_label.replace("Week", "") if is_week_slot else ""
+                if is_week_slot:
+                    cat_only, cat_err = process_inventory_categorization_step(orig)
+                    if cat_err:
+                        st.caption(f"⚠ {cat_err}")
+                        continue
                     st.download_button(
-                        "📥 Kateqoriya + sıra + filtr",
-                        data=proc_emal,
-                        file_name=f"{inv_label}_{stem}_kateqoriya_emal.xlsx",
+                        f"📥 Finestra Week {week_no}",
+                        data=cat_only,
+                        file_name=f"finestra_week_{week_no}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"inv_dl_proc_{inv_key}_{inv_rest}",
+                        key=f"inv_dl_finestra_{inv_key}_{inv_rest}",
                         use_container_width=True,
                     )
+                else:
+                    cat_month, cat_month_err = process_inventory_categorization_step(orig)
+                    if cat_month_err:
+                        st.caption(f"⚠ {cat_month_err}")
+                        continue
+                    st.download_button(
+                        "📥 Finestra Month",
+                        data=cat_month,
+                        file_name="finestra_month.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"inv_dl_finestra_{inv_key}_{inv_rest}",
+                        use_container_width=True,
+                    )
+                if is_week_slot:
+                    _inv_opts = InventoryFilterOptions(
+                        drop_empty_kateqoriya=st.session_state.get(
+                            "inv_filter_drop_empty_kat", True
+                        ),
+                        drop_empty_mahsul=st.session_state.get(
+                            "inv_filter_drop_empty_mah", True
+                        ),
+                        exclude_farqin_open_interval_neg10_pos10=st.session_state.get(
+                            "inv_filter_exclude_farqin_mid", True
+                        ),
+                    )
+                    proc_emal, err_emal = process_inventory_emal_pipeline(
+                        orig, filter_options=_inv_opts
+                    )
+                    if err_emal:
+                        st.caption(f"⚠ {err_emal}")
+                    else:
+                        st.download_button(
+                            f"📥 Weekly analysis Week {week_no}",
+                            data=proc_emal,
+                            file_name=f"weekly_analysis_week_{week_no}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"inv_dl_proc_{inv_key}_{inv_rest}",
+                            use_container_width=True,
+                        )
 elif st.session_state.panel_branch == "restoran":
     _render_restoran_online_panel()
 

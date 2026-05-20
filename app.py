@@ -3,7 +3,11 @@ import json
 import math
 import os
 import re
+import smtplib
 import sqlite3
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -37,6 +41,7 @@ _INVENTORY_DROP_COL_INDEXES: tuple[int, ...] = (
 _SORT_COL_INDEX_AFTER_DROPS = 0
 _INV_DB_PATH = os.path.join(os.path.dirname(__file__), "inventory_store.db")
 _INV_WEEK_SLOTS = ("inv_week1", "inv_week2", "inv_week3", "inv_week4")
+_INV_DB_READY = False
 
 
 def _inv_remote_cfg() -> Optional[dict]:
@@ -95,6 +100,9 @@ def _inv_db_connect() -> sqlite3.Connection:
 
 
 def _inv_db_init() -> None:
+    global _INV_DB_READY
+    if _INV_DB_READY:
+        return
     with _inv_db_connect() as conn:
         conn.execute(
             """
@@ -108,6 +116,7 @@ def _inv_db_init() -> None:
             )
             """
         )
+    _INV_DB_READY = True
 
 
 def _inv_store_file(restaurant: str, slot_key: str, file_name: str, file_bytes: bytes) -> None:
@@ -129,6 +138,7 @@ def _inv_store_file(restaurant: str, slot_key: str, file_name: str, file_bytes: 
         )
         if out is not None:
             return
+    _inv_db_init()
     with _inv_db_connect() as conn:
         conn.execute(
             """
@@ -167,6 +177,7 @@ def _inv_get_file(restaurant: str, slot_key: str) -> Optional[dict]:
                 "bytes": file_bytes,
                 "uploaded_at": row.get("uploaded_at", ""),
             }
+    _inv_db_init()
     with _inv_db_connect() as conn:
         row = conn.execute(
             """
@@ -198,6 +209,7 @@ def _inv_delete_file(restaurant: str, slot_key: str) -> None:
         )
         if out is not None:
             return
+    _inv_db_init()
     with _inv_db_connect() as conn:
         conn.execute(
             "DELETE FROM inventory_files WHERE restaurant = ? AND slot_key = ?",
@@ -220,6 +232,7 @@ def _inv_count_saved_weeks(restaurant: str) -> int:
         )
         if isinstance(rows, list):
             return len(rows)
+    _inv_db_init()
     placeholders = ",".join("?" for _ in _INV_WEEK_SLOTS)
     params = [restaurant, *_INV_WEEK_SLOTS]
     with _inv_db_connect() as conn:
@@ -392,8 +405,120 @@ def process_inventory_emal_pipeline(
     return process_inventory_filter_step(proc, options=filter_options)
 
 
+def _inv_smtp_cfg() -> Optional[dict]:
+    try:
+        user = st.secrets.get("SMTP_USER", "").strip()
+        password = st.secrets.get("SMTP_APP_PASSWORD", "").strip()
+    except Exception:
+        return None
+    if not user or not password:
+        return None
+    try:
+        port = int(st.secrets.get("SMTP_PORT", 587))
+    except (TypeError, ValueError):
+        port = 587
+    host = str(st.secrets.get("SMTP_HOST", "smtp.gmail.com")).strip() or "smtp.gmail.com"
+    return {"host": host, "port": port, "user": user, "password": password}
+
+
+def _inv_valid_email(addr: str) -> bool:
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", (addr or "").strip()))
+
+
+def _inv_collect_export_attachments(
+    restaurant: str,
+    rest_slug: str,
+    rest_label: str,
+    filter_options: InventoryFilterOptions,
+) -> Tuple[list[tuple[str, bytes]], list[str]]:
+    """Saxlanmış slotlar üçün emal olunmuş faylları (ad, bytes) siyahısı."""
+    slots = [
+        ("1", "inv_week1"),
+        ("2", "inv_week2"),
+        ("3", "inv_week3"),
+        ("4", "inv_week4"),
+        ("month", "inv_month"),
+    ]
+    files: list[tuple[str, bytes]] = []
+    errors: list[str] = []
+
+    for week_no, slot_key in slots:
+        saved = _inv_get_file(restaurant, slot_key)
+        if not saved:
+            continue
+        orig = saved["bytes"]
+        if slot_key == "inv_month":
+            data, err = process_inventory_categorization_step(orig)
+            if err:
+                errors.append(f"MONTH: {err}")
+                continue
+            if data:
+                files.append((f"{rest_slug}_month.xlsx", data))
+            continue
+
+        cat_only, cat_err = process_inventory_categorization_step(orig)
+        if cat_err:
+            errors.append(f"Week {week_no} (kateqoriya): {cat_err}")
+        elif cat_only:
+            files.append((f"{rest_slug}_week_{week_no}.xlsx", cat_only))
+
+        proc_emal, err_emal = process_inventory_emal_pipeline(
+            orig, filter_options=filter_options
+        )
+        if err_emal:
+            errors.append(f"Week {week_no} (analysis): {err_emal}")
+        elif proc_emal:
+            files.append((f"{rest_slug}_weekly_analysis_{week_no}.xlsx", proc_emal))
+
+    return files, errors
+
+
+def _inv_send_exports_email(
+    to_email: str,
+    restaurant: str,
+    attachments: list[tuple[str, bytes]],
+) -> Tuple[bool, str]:
+    cfg = _inv_smtp_cfg()
+    if not cfg:
+        return False, (
+            "SMTP konfiqurasiyası tapılmadı. Streamlit Secrets-ə "
+            "`SMTP_USER` və `SMTP_APP_PASSWORD` (Gmail App Password) əlavə edin."
+        )
+    if not attachments:
+        return False, "Göndəriləcək hazır fayl yoxdur. Əvvəl həftə/MONTH fayllarını yükləyin."
+
+    msg = MIMEMultipart()
+    msg["From"] = cfg["user"]
+    msg["To"] = to_email
+    msg["Subject"] = f"İnventarizasiya — {restaurant} ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+    names = ", ".join(n for n, _ in attachments)
+    msg.attach(
+        MIMEText(
+            f"Salam,\n\n{restaurant} üçün inventar export faylları əlavədədir.\n\n"
+            f"Fayllar ({len(attachments)}): {names}\n\n"
+            "— ROOM CLOPOS Online",
+            "plain",
+            "utf-8",
+        )
+    )
+    for fname, data in attachments:
+        part = MIMEApplication(data, _subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        part.add_header("Content-Disposition", "attachment", filename=fname)
+        msg.attach(part)
+
+    try:
+        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=60) as server:
+            server.starttls()
+            server.login(cfg["user"], cfg["password"])
+            server.sendmail(cfg["user"], [to_email], msg.as_string())
+        return True, f"{len(attachments)} fayl göndərildi: {to_email}"
+    except smtplib.SMTPAuthenticationError:
+        return False, "Gmail girişi uğursuz — App Password düzgündürmü yoxlayın."
+    except Exception as e:
+        return False, f"Email göndərilmədi: {e}"
+
+
 st.set_page_config(page_title="ROOM CLOPOS Online", layout="wide")
-_inv_db_init()
 
 if "selected_res" not in st.session_state:
     st.session_state.selected_res = "ROOM"
@@ -1634,6 +1759,11 @@ Sol paneldə **Restoran** aktiv olanda həmin restoranın düyməsini seçin; **
    - İstəyə görə: **Fərqin dəyəri** sütununda (**başlıq** ilə tapılır; yoxdursa, emaldan sonra **J** mövqesi götürülür) dəyəri **sıx** olaraq **-10 ilə 10 arasında** olan sətirlər çıxarılır (**-10** və **10** saxlanılır).  
    - Rəqəmlər Azərbaycan Excel formatında ola bilər (məs. onluq **vergül**).
 
+**Email ilə göndər**
+
+- **Alıcı Gmail** sahəsinə istənilən ünvan yazılır; **Göndər** düyməsi ilə cari restoran üçün saxlanmış və emal olunmuş fayllar (həftə + weekly analysis + month) bir email-ə əlavə olunur.
+- Göndərən hesab Streamlit **Secrets**-də `SMTP_USER` + `SMTP_APP_PASSWORD` (Gmail App Password) ilə təyin olunur.
+
 **Xətalar**
 
 - Əgər emal alınmazsa, pəncərədə **⚠** ilə qısa səbəb göstərilir; fayl strukturunu və sütun adlarını yoxlayın.
@@ -1752,6 +1882,56 @@ if st.session_state.panel_branch == "inventar":
     else:
         st.info(f"Bu restoran üçün saxlanmış həftə faylları: {loaded_weeks}/4")
 
+    with st.container(border=True):
+        st.markdown("##### 📧 Email ilə göndər")
+        inv_to_email = st.text_input(
+            "Alıcı Gmail",
+            placeholder="məs. muhasib@gmail.com",
+            key="inv_email_to",
+            help="Hazır export faylları bu ünvana göndərilir (yalnız «Göndər» düyməsi ilə).",
+        )
+        if not _inv_smtp_cfg():
+            st.caption(
+                "Göndərmə üçün Streamlit **Secrets**-də `SMTP_USER` və `SMTP_APP_PASSWORD` "
+                "(Gmail App Password) təyin olunmalıdır."
+            )
+        if st.button(
+            "📤 Göndər",
+            key="inv_email_send_btn",
+            type="primary",
+            use_container_width=True,
+        ):
+            to_addr = (inv_to_email or "").strip()
+            if not _inv_valid_email(to_addr):
+                st.error("Düzgün email ünvanı yazın (məs. ad@gmail.com).")
+            else:
+                _send_opts = InventoryFilterOptions(
+                    drop_empty_kateqoriya=st.session_state.get(
+                        "inv_filter_drop_empty_kat", True
+                    ),
+                    drop_empty_mahsul=st.session_state.get(
+                        "inv_filter_drop_empty_mah", True
+                    ),
+                    exclude_farqin_open_interval_neg10_pos10=st.session_state.get(
+                        "inv_filter_exclude_farqin_mid", True
+                    ),
+                )
+                with st.spinner("Fayllar hazırlanır və email göndərilir..."):
+                    atts, prep_errs = _inv_collect_export_attachments(
+                        inv_rest,
+                        inv_rest_slug,
+                        inv_rest_label,
+                        _send_opts,
+                    )
+                    ok, msg = _inv_send_exports_email(to_addr, inv_rest, atts)
+                if prep_errs:
+                    for pe in prep_errs[:5]:
+                        st.warning(pe)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+
     inv_cols = st.columns(5)
     for inv_col, (inv_label, inv_key) in zip(inv_cols, inv_slots):
         with inv_col:
@@ -1791,9 +1971,9 @@ if st.session_state.panel_branch == "inventar":
                         st.caption(f"⚠ {cat_month_err}")
                         continue
                     st.download_button(
-                        "📥 Finestra Month",
+                        f"📥 {inv_rest_label} month",
                         data=cat_month,
-                        file_name="finestra_month.xlsx",
+                        file_name=f"{inv_rest_slug}_month.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key=f"inv_dl_finestra_{inv_key}_{inv_rest}",
                         use_container_width=True,
